@@ -22,7 +22,28 @@ env:
   RUSTFLAGS: "-Awarnings"
 
 jobs:
-  rust_ci:
+  rust-clippy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly-2023-05-20
+          components: clippy
+          default: true
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          version: "23.x"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./rust -> target"
+          key: "ubuntu-latest-clippy"
+      - name: Run Clippy
+        run: cd rust && cargo clippy --all-features --package lakesoul-io-c --package lakesoul-metadata-c
+
+  rust-ci:
     runs-on: ubuntu-latest
     services:
       # Label used to access the service container
@@ -61,3 +82,29 @@ jobs:
       - name: Run tests
         run: cd rust && sudo cargo test --all-features --package lakesoul-datafusion
 
+  verify-hash-consistency:
+    name: verify benchmark results (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-builder
+        with:
+          rust-version: stable
+      - name: Generate benchmark data and expected query results
+        run: |
+          mkdir -p lakesoul/sqllogictest/test_files/tpch/data
+          git clone https://github.com/databricks/tpch-dbgen.git
+          cd tpch-dbgen
+          make
+          ./dbgen -f -s 0.1
+          mv *.tbl ../lakesoul/sqllogictest/test_files/tpch/data
+      - name: Verify that benchmark queries return expected results
+        run: |
+          export TPCH_DATA=`realpath datafusion/sqllogictest/test_files/tpch/data`
+          # use release build for plan verificaton because debug build causes stack overflow
+          sudo cargo test verify_hash_consistency --package lakesoul-datafusion --features=ci -- --test-threads=1
+      - name: Verify Working Directory Clean
+        run: git diff --exit-code
