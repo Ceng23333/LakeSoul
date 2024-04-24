@@ -37,7 +37,7 @@ use lakesoul_io::lakesoul_io_config::LakeSoulIOConfig;
 use lakesoul_metadata::MetaDataClientRef;
 use proto::proto::entity::TableInfo;
 
-use crate::catalog::parse_table_info_partitions;
+use lakesoul_metadata::utils::parse_table_info_partitions;
 use crate::lakesoul_table::helpers::{listing_partition_info, parse_partitions_for_partition_desc, prune_partitions};
 use crate::serialize::arrow_java::schema_from_metadata_str;
 
@@ -75,7 +75,7 @@ impl LakeSoulTableProvider {
         as_sink: bool,
     ) -> crate::error::Result<Self> {
         let table_schema = schema_from_metadata_str(&table_info.table_schema);
-        let (range_partitions, hash_partitions) = parse_table_info_partitions(table_info.partitions.clone())?;
+        let (range_partitions, hash_partitions) = parse_table_info_partitions(&table_info.partitions);
         let mut range_partition_projection = Vec::with_capacity(range_partitions.len());
         let mut file_schema_projection = Vec::with_capacity(table_schema.fields().len() - range_partitions.len());
         for (idx, field) in table_schema.fields().iter().enumerate() {

@@ -18,7 +18,7 @@ use prost::Message;
 
 use lakesoul_metadata::{Builder, Client, MetaDataClient, PreparedStatementMap, Runtime};
 use lakesoul_metadata::error::LakeSoulMetaDataError;
-use lakesoul_metadata::transfusion::SplitDesc;
+use lakesoul_metadata::utils::SplitDesc;
 use proto::proto::entity;
 
 #[repr(C)]
@@ -386,7 +386,7 @@ pub extern "C" fn create_split_desc_array(
     let table_name = c_char2str(table_name);
     let namespace = c_char2str(namespace);
     let result: Result<*mut c_char, LakeSoulMetaDataError> = runtime.block_on(async {
-        let ret = lakesoul_metadata::transfusion::split_desc_array(client, prepared, table_name, namespace).await?;
+        let ret = lakesoul_metadata::utils::split_desc_array(client, prepared, table_name, namespace).await?;
         let v = serde_json::to_vec(&ret)?;
         Ok(CString::new(v)
             .map_err(|e| LakeSoulMetaDataError::Internal(e.to_string()))?
@@ -419,7 +419,7 @@ pub extern "C" fn debug(callback: extern "C" fn(bool, *const c_char)) -> *mut c_
             partition_desc: HashMap::new(),
             table_schema: "".to_string(),
         }; 1];
-    let array = lakesoul_metadata::transfusion::SplitDescArray(x);
+    let array = lakesoul_metadata::utils::SplitDescArray(x);
     let json_vec = serde_json::to_vec(&array).unwrap();
     let c_string = CString::new(json_vec).unwrap();
     let x = CString::new("oops").unwrap().into_raw();

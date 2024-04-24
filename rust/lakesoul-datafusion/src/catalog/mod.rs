@@ -93,29 +93,6 @@ pub(crate) async fn create_io_config_builder(
     }
 }
 
-pub(crate) fn parse_table_info_partitions(partitions: String) -> Result<(Vec<String>, Vec<String>)> {
-    let (range_keys, hash_keys) = partitions.split_at(
-        partitions
-            .find(';')
-            .ok_or(LakeSoulError::Internal("wrong partition format".to_string()))?,
-    );
-    let hash_keys = &hash_keys[1..];
-    Ok((
-        range_keys
-            .split(',')
-            .collect::<Vec<&str>>()
-            .iter()
-            .filter_map(|str| if str.is_empty() { None } else { Some(str.to_string()) })
-            .collect::<Vec<String>>(),
-        hash_keys
-            .split(',')
-            .collect::<Vec<&str>>()
-            .iter()
-            .filter_map(|str| if str.is_empty() { None } else { Some(str.to_string()) })
-            .collect::<Vec<String>>(),
-    ))
-}
-
 pub(crate) async fn commit_data(
     client: MetaDataClientRef,
     table_name: &str,

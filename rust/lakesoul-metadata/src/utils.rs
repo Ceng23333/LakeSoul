@@ -6,20 +6,18 @@
 //! [WIP]
 //! prototype
 use std::collections::{HashMap, HashSet};
-use std::ops::{Deref, DerefMut};
 
 use prost::Message;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::Mutex;
 use tokio_postgres::Client;
 
 use proto::proto::entity::{DataCommitInfo, DataFileOp, FileOp, JniWrapper, PartitionInfo, TableInfo};
 
 use crate::{DaoType, error::Result, execute_query, PARAM_DELIM, PreparedStatementMap};
 use crate::error::LakeSoulMetaDataError;
-use crate::transfusion::config::{
+use crate::utils::config::{
     LAKESOUL_HASH_PARTITION_SPLITTER, LAKESOUL_NON_PARTITION_TABLE_PART_DESC,
     LAKESOUL_PARTITION_SPLITTER_OF_RANGE_AND_HASH, LAKESOUL_RANGE_PARTITION_SPLITTER,
 };
@@ -78,9 +76,8 @@ pub async fn split_desc_array(
     table_name: &str,
     namespace: &str,
 ) -> Result<SplitDescArray> {
-    let db = RawClient::new(client, prepared);
-    let table_info = db.get_table_info_by_table_name(table_name, namespace).await?;
-    let data_files = db.get_table_data_info(&table_info.table_id).await?;
+    let table_info = get_table_info_by_table_name(client, prepared, table_name, namespace).await?;
+    let data_files = get_table_data_info(client, prepared, &table_info.table_id).await?;
 
     // create splits
     let mut splits = Vec::new();
@@ -137,137 +134,129 @@ pub async fn split_desc_array(
     Ok(SplitDescArray(splits))
 }
 
-
-struct RawClient<'a> {
-    client: Mutex<&'a Client>,
-    prepared: Mutex<&'a mut PreparedStatementMap>,
-}
-// struct RawClient<'a> {
-//     client: &'a Client,
-//     prepared: &'a mut PreparedStatementMap,
-// }
-
-impl<'a> RawClient<'_> {
-    fn new(client: &'a Client, prepared: &'a mut PreparedStatementMap) -> RawClient<'a> {
-        RawClient {
-            client: Mutex::new(client),
-            prepared: Mutex::new(prepared),
-        }
-    }
-    pub async fn get_table_info_by_table_name(&self, table_name: &str, namespace: &str) -> Result<TableInfo> {
-        match self
-            .query(
-                DaoType::SelectTableInfoByTableNameAndNameSpace as i32,
-                [table_name, namespace].join(PARAM_DELIM),
-            )
-            .await
-        {
-            Ok(wrapper) if wrapper.table_info.is_empty() => Err(crate::error::LakeSoulMetaDataError::NotFound(
-                format!("Table '{}' not found", table_name),
-            )),
-            Ok(wrapper) => Ok(wrapper.table_info[0].clone()),
-            Err(err) => Err(err),
-        }
-    }
-
-    pub async fn get_table_data_info(&self, table_id: &str) -> Result<Vec<DataFileInfo>> {
-        // logic from scala: DataOperation
-        let vec = self.get_all_partition_info(table_id).await?;
-        self.get_table_data_info_by_partition_info(vec)
-            .await
-    }
-
-    async fn get_table_data_info_by_partition_info(
-        &self,
-        partition_info_arr: Vec<PartitionInfo>,
-    ) -> Result<Vec<DataFileInfo>> {
-        let mut file_info_buf = Vec::new();
-        for pi in &partition_info_arr {
-            file_info_buf.extend(self.get_single_partition_data_info(pi).await?)
-        }
-        Ok(file_info_buf)
-    }
-
-
-    /// return file info in this partition that match the current read version
-    async fn get_single_partition_data_info(&self, partition_info: &PartitionInfo) -> Result<Vec<DataFileInfo>> {
-        let mut file_arr_buf = Vec::new();
-        let data_commit_info_list = self.get_data_commit_info_of_single_partition(partition_info).await?;
-        for data_commit_info in &data_commit_info_list {
-            for file in &data_commit_info.file_ops {
-                file_arr_buf.push(DataFileInfo::compose(data_commit_info, file, partition_info)?)
-            }
-        }
-        Ok(self.filter_files(file_arr_buf))
-    }
-
-    /// 1:1 fork from scala by chat_gpt
-    fn filter_files(&self, file_arr_buf: Vec<DataFileInfo>) -> Vec<DataFileInfo> {
-        let mut dup_check = HashSet::new();
-        let mut file_res_arr_buf = Vec::new();
-
-        if file_arr_buf.len() > 1 {
-            for i in (0..file_arr_buf.len()).rev() {
-                if file_arr_buf[i].file_op == "del" {
-                    dup_check.insert(file_arr_buf[i].path.clone());
-                } else if dup_check.is_empty() || !dup_check.contains(&file_arr_buf[i].path) {
-                    file_res_arr_buf.push(file_arr_buf[i].clone());
-                }
-            }
-            file_res_arr_buf.reverse();
-        } else {
-            file_res_arr_buf = file_arr_buf.into_iter().filter(|item| item.file_op == "add").collect();
-        }
-
-        file_res_arr_buf
-    }
-
-    pub async fn get_all_partition_info(&self, table_id: &str) -> Result<Vec<PartitionInfo>> {
-        match self
-            .query(DaoType::ListPartitionByTableId as i32, table_id.to_string())
-            .await
-        {
-            Ok(wrapper) => Ok(wrapper.partition_info),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// maybe use AnyMap
-    async fn query(&self, query_type: i32, joined_string: String) -> Result<JniWrapper> {
-        let encoded = execute_query(
-            self.client.lock().await.deref(),
-            self.prepared.lock().await.deref_mut(),
-            query_type,
-            joined_string.clone(),
+pub async fn get_table_info_by_table_name(
+    client: &Client,
+    prepared: &mut PreparedStatementMap,
+    table_name: &str, namespace: &str
+) -> Result<TableInfo> {
+    match execute_query(
+        client,
+        prepared,
+        DaoType::SelectTableInfoByTableNameAndNameSpace as i32,
+        [table_name, namespace].join(PARAM_DELIM),
         )
-            .await?;
-        Ok(JniWrapper::decode(prost::bytes::Bytes::from(encoded))?)
+        .await
+    {
+        Ok(encoded) => {
+            let wrapper = JniWrapper::decode(prost::bytes::Bytes::from(encoded))?;
+            if wrapper.table_info.is_empty() {
+                Err(crate::error::LakeSoulMetaDataError::NotFound(
+                format!("Table '{}' not found", table_name)))
+            } else {
+                Ok(wrapper.table_info[0].clone())
+            }
+        },
+        Err(err) => Err(err),
     }
+}
 
-    async fn get_data_commit_info_of_single_partition(
-        &self,
-        partition_info: &PartitionInfo,
-    ) -> Result<Vec<DataCommitInfo>> {
-        let table_id = &partition_info.table_id;
-        let partition_desc = &partition_info.partition_desc;
-        let joined_commit_id = &partition_info
-            .snapshot
-            .iter()
-            .map(|commit_id| format!("{:0>16x}{:0>16x}", commit_id.high, commit_id.low))
-            .collect::<Vec<String>>()
-            .join("");
-        let joined_string = [table_id.as_str(), partition_desc.as_str(), joined_commit_id.as_str()].join(PARAM_DELIM);
-        match self
-            .query(
-                DaoType::ListDataCommitInfoByTableIdAndPartitionDescAndCommitList as i32,
-                joined_string,
-            )
-            .await
-        {
-            Ok(wrapper) => Ok(wrapper.data_commit_info),
-            Err(e) => Err(e),
+pub async fn get_table_data_info(    
+    client: &Client,
+    prepared: &mut PreparedStatementMap,
+    table_id: &str
+) -> Result<Vec<DataFileInfo>> {
+    // logic from scala: DataOperation
+    let vec = get_all_partition_info(client, prepared, table_id).await?;
+    get_table_data_info_by_partition_info(client, prepared, vec)
+        .await
+}
+
+pub async fn get_all_partition_info(    
+    client: &Client,
+    prepared: &mut PreparedStatementMap,
+    table_id: &str
+) -> Result<Vec<PartitionInfo>> {
+    match execute_query(client, prepared, DaoType::ListPartitionByTableId as i32, table_id.to_string())
+        .await
+    {
+        Ok(encoded) => Ok(JniWrapper::decode(prost::bytes::Bytes::from(encoded))?.partition_info),
+        Err(e) => Err(e),
+    }
+}
+
+async fn get_table_data_info_by_partition_info(
+    client: &Client,
+    prepared: &mut PreparedStatementMap,
+    partition_info_arr: Vec<PartitionInfo>,
+) -> Result<Vec<DataFileInfo>> {
+    let mut file_info_buf = Vec::new();
+    for partition in &partition_info_arr {
+        file_info_buf.extend(get_single_partition_data_info(client, prepared, partition).await?)
+    }
+    Ok(file_info_buf)
+}
+
+/// return file info in this partition that match the current read version
+async fn get_single_partition_data_info(
+    client: &Client,
+    prepared: &mut PreparedStatementMap, 
+    partition_info: &PartitionInfo
+) -> Result<Vec<DataFileInfo>> {
+    let mut file_arr_buf = Vec::new();
+    let data_commit_info_list = get_data_commit_info_of_single_partition(client, prepared, partition_info).await?;
+    for data_commit_info in &data_commit_info_list {
+        for file in &data_commit_info.file_ops {
+            file_arr_buf.push(DataFileInfo::compose(data_commit_info, file, partition_info)?)
         }
     }
+    Ok(filter_files(file_arr_buf))
+}
+
+async fn get_data_commit_info_of_single_partition(
+    client: &Client,
+    prepared: &mut PreparedStatementMap, 
+    partition_info: &PartitionInfo,
+) -> Result<Vec<DataCommitInfo>> {
+    let table_id = &partition_info.table_id;
+    let partition_desc = &partition_info.partition_desc;
+    let joined_commit_id = &partition_info
+        .snapshot
+        .iter()
+        .map(|commit_id| format!("{:0>16x}{:0>16x}", commit_id.high, commit_id.low))
+        .collect::<Vec<String>>()
+        .join("");
+    let joined_string = [table_id.as_str(), partition_desc.as_str(), joined_commit_id.as_str()].join(PARAM_DELIM);
+    match execute_query(
+            client,
+            prepared,
+            DaoType::ListDataCommitInfoByTableIdAndPartitionDescAndCommitList as i32,
+            joined_string,
+        )
+        .await
+    {
+        Ok(encoded) => Ok(JniWrapper::decode(prost::bytes::Bytes::from(encoded))?.data_commit_info),
+        Err(e) => Err(e),
+    }
+}
+
+fn filter_files(file_arr_buf: Vec<DataFileInfo>) -> Vec<DataFileInfo> {
+    let mut dup_check = HashSet::new();
+    let mut file_res_arr_buf = Vec::new();
+
+    if file_arr_buf.len() > 1 {
+        for i in (0..file_arr_buf.len()).rev() {
+            if file_arr_buf[i].file_op == "del" {
+                dup_check.insert(file_arr_buf[i].path.clone());
+            } else if dup_check.is_empty() || !dup_check.contains(&file_arr_buf[i].path) {
+                file_res_arr_buf.push(file_arr_buf[i].clone());
+            }
+        }
+        file_res_arr_buf.reverse();
+    } else {
+        file_res_arr_buf = file_arr_buf.into_iter().filter(|item| item.file_op == "add").collect();
+    }
+
+    file_res_arr_buf
 }
 
 fn has_hash_partitions(table_info: &TableInfo) -> bool {

@@ -16,7 +16,7 @@ use error::{LakeSoulMetaDataError, Result};
 pub use metadata_client::{MetaDataClient, MetaDataClientRef};
 use proto::proto::entity;
 
-pub mod transfusion;
+pub mod utils;
 
 pub mod error;
 mod metadata_client;

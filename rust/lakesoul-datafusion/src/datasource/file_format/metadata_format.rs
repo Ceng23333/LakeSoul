@@ -39,6 +39,7 @@ use lakesoul_io::helpers::{columnar_values_to_partition_desc, columnar_values_to
 use lakesoul_io::lakesoul_io_config::LakeSoulIOConfig;
 use lakesoul_io::lakesoul_writer::{AsyncBatchWriter, MultiPartAsyncWriter};
 use lakesoul_metadata::MetaDataClientRef;
+use lakesoul_metadata::utils::parse_table_info_partitions;
 use object_store::{ObjectMeta, ObjectStore};
 use proto::proto::entity::TableInfo;
 use rand::distributions::DistString;
@@ -47,7 +48,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
-use crate::catalog::{commit_data, parse_table_info_partitions};
+use crate::catalog::commit_data;
 use crate::lakesoul_table::helpers::create_io_config_builder_from_table_info;
 
 pub struct LakeSoulMetaDataParquetFormat {
@@ -273,7 +274,7 @@ impl LakeSoulHashSinkExec {
         table_info: Arc<TableInfo>,
         metadata_client: MetaDataClientRef,
     ) -> Result<Self> {
-        let (range_partitions, _) = parse_table_info_partitions(table_info.partitions.clone()).map_err(|_| DataFusionError::External("parse table_info.partitions failed".into()))?;
+        let (range_partitions, _) = parse_table_info_partitions(&table_info.partitions);
         let range_partitions = Arc::new(range_partitions);
         Ok(Self {
             input,

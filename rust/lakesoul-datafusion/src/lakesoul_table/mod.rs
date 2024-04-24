@@ -17,11 +17,12 @@ use datafusion::{
 };
 use lakesoul_io::{lakesoul_io_config::create_session_context_with_planner, lakesoul_reader::RecordBatch};
 use lakesoul_metadata::{MetaDataClient, MetaDataClientRef};
+use lakesoul_metadata::utils::parse_table_info_partitions;
 use proto::proto::entity::TableInfo;
 use tracing::debug;
 
 use crate::{
-    catalog::{create_io_config_builder, parse_table_info_partitions, LakeSoulTableProperty},
+    catalog::{create_io_config_builder, LakeSoulTableProperty},
     error::Result,
     planner::query_planner::LakeSoulQueryPlanner,
     serialize::arrow_java::schema_from_metadata_str,
@@ -65,7 +66,7 @@ impl LakeSoulTable {
 
         let table_name = table_info.table_name.clone();
         let properties = serde_json::from_str::<LakeSoulTableProperty>(&table_info.properties)?;
-        let (range_partitions, hash_partitions) = parse_table_info_partitions(table_info.partitions.clone())?;
+        let (range_partitions, hash_partitions) = parse_table_info_partitions(&table_info.partitions);
 
         Ok(Self {
             client,
