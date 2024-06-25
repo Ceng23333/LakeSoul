@@ -65,6 +65,17 @@ SPDX-License-Identifier: Apache-2.0
             <artifactId>arrow-c-data</artifactId>
             <version>${arrow.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>flight-sql</artifactId>
+            <version>${arrow.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.protobuf</groupId>
+                    <artifactId>protobuf-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
 
         <!-- scala deps -->
         <dependency>
@@ -83,7 +94,7 @@ SPDX-License-Identifier: Apache-2.0
             <artifactId>scala-reflect</artifactId>
             <version>${scala.version}</version>
         </dependency>
-        
+
 
         <!--        jnr-ffi deps-->
         <dependency>
@@ -114,7 +125,6 @@ SPDX-License-Identifier: Apache-2.0
                 </exclusion>
             </exclusions>
             <version>${substrait.version}</version>
-            <scope>compile</scope>
         </dependency>
 
         <!-- protobuf -->

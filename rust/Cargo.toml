@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [workspace]
+exclude = ["lakesoul-flight"]
 members = [
     "lakesoul-metadata",
     "lakesoul-metadata-c",
