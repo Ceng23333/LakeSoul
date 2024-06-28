@@ -469,10 +469,10 @@ SPDX-License-Identifier: Apache-2.0
                             <include>org.antlr:*</include>
                             <include>org.yaml:snakeyaml</include>
                         </includes>
-                        <excludes>
-                            <exclude>org.apache.logging.log4j:*</exclude>
-                            <exclude>org.slf4j:*</exclude>
-                        </excludes>
+                        <!--                        <excludes>-->
+                        <!--                            <exclude>org.apache.logging.log4j:*</exclude>-->
+                        <!--                            <exclude>org.slf4j:*</exclude>-->
+                        <!--                        </excludes>-->
                     </artifactSet>
                     <filters>
                         <filter>
