@@ -56,10 +56,6 @@ SPDX-License-Identifier: Apache-2.0
                     <groupId>log4j</groupId>
                     <artifactId>log4j</artifactId>
                 </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-api</artifactId>
-                </exclusion>
             </exclusions>
         </dependency>
         <!--flink-->
