@@ -558,6 +558,10 @@ SPDX-License-Identifier: Apache-2.0
                             <pattern>org.yaml.snakeyaml</pattern>
                             <shadedPattern>com.lakesoul.shaded.org.yaml.snakeyaml</shadedPattern>
                         </relocation>
+                        <relocation>
+                            <pattern>com.fasterxml.jackson.databind</pattern>
+                            <shadedPattern>com.lakesoul.shaded.com.fasterxml.jackson.databind</shadedPattern>
+                        </relocation>
                     </relocations>
                     <transformers>
                         <transformer
