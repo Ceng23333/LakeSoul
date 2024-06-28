@@ -7,5 +7,6 @@ import java.io.IOException;
 public class SubstraitTest {
     public static void main(String[] args) throws IOException {
         SimpleExtension.loadDefaults();
+        System.out.println("SimpleExtension.loadDefaults Done");
     }
 }
