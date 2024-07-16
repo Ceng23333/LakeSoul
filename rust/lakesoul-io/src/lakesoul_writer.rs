@@ -207,7 +207,7 @@ impl MultiPartAsyncWriter {
         }?;
 
         // get underlying multipart uploader
-        let (multipart_id, async_writer) = object_store.put_multipart(&path).await?;
+        let (multi_part_id, async_writer) = object_store.put_multipart(&path).await?;
         let in_mem_buf = InMemBuf(Arc::new(AtomicRefCell::new(VecDeque::<u8>::with_capacity(
             16 * 1024 * 1024, // 16kb
         ))));
@@ -241,7 +241,7 @@ impl MultiPartAsyncWriter {
             task_context,
             schema,
             writer: async_writer,
-            multi_part_id: multipart_id,
+            multi_part_id,
             arrow_writer,
             _config: config.clone(),
             object_store,
@@ -263,6 +263,7 @@ impl MultiPartAsyncWriter {
         // underlying writer
         writer: &mut Box<dyn AsyncWrite + Unpin + Send>,
     ) -> Result<()> {
+        // arrow_cast::pretty::print_batches(&[batch.clone()]);
         arrow_writer.write(&batch)?;
         let mut v = in_mem_buf
             .0
@@ -313,6 +314,7 @@ impl AsyncBatchWriter for MultiPartAsyncWriter {
         let mut this = *self;
         let arrow_writer = this.arrow_writer;
         arrow_writer.close()?;
+        dbg!("arrow_writer.close()? finish");
         let mut v = this
             .in_mem_buf
             .0
@@ -323,7 +325,9 @@ impl AsyncBatchWriter for MultiPartAsyncWriter {
         }
         // shutdown multi-part async writer to complete the upload
         this.writer.flush().await?;
+        dbg!("this.writer.flush().await? finish");
         this.writer.shutdown().await?;
+        dbg!("this.writer.shutdown().await? finish");
         Ok(vec![])
     }
 
@@ -906,7 +910,12 @@ mod tests {
     use arrow_array::Array;
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::error::Result;
+    use datafusion::execution::context::SessionState;
+    use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+    use datafusion::prelude::{SessionConfig, SessionContext};
+    use object_store::aws::AmazonS3Builder;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReader;
+    use url::Url;
     use std::fs::File;
     use std::sync::Arc;
     use tokio::runtime::Builder;
@@ -1051,12 +1060,13 @@ mod tests {
             .with_max_row_group_size(250000)
             .with_object_store_option("fs.s3a.access.key".to_string(), "minioadmin1".to_string())
             .with_object_store_option("fs.s3a.secret.key".to_string(), "minioadmin1".to_string())
-            .with_object_store_option("fs.s3a.endpoint".to_string(), "http://localhost:9000".to_string());
+            .with_object_store_option("fs.s3a.endpoint".to_string(), "http://localhost:9002".to_string())
+            .with_object_store_option("fs.s3a.path.style.access".to_string(), "true".to_string());
 
         let read_conf = common_conf_builder
             .clone()
             .with_files(vec![
-                "s3://lakesoul-test-bucket/data/native-io-test/large_file.parquet".to_string()
+                "s3://lakesoul-test-s3/part-98uJe60VmuKQ3cfL_0003.parquet".to_string()
             ])
             .build();
         let mut reader = LakeSoulReader::new(read_conf)?;
@@ -1067,7 +1077,7 @@ mod tests {
         let write_conf = common_conf_builder
             .clone()
             .with_files(vec![
-                "s3://lakesoul-test-bucket/data/native-io-test/large_file_written.parquet".to_string(),
+                "s3://lakesoul-test-s3/part-98uJe60VmuKQ3cfL_0003_writen.parquet".to_string(),
             ])
             .with_schema(schema)
             .build();
@@ -1176,5 +1186,26 @@ mod tests {
 
             Ok(())
         })
+    }
+
+    #[tokio::test]
+    async fn test_s3_connect() -> Result<()> {
+        let runtime = Arc::new(RuntimeEnv::new(RuntimeConfig::new())?);
+        let url = Url::parse("s3://lakesoul-test-s3").unwrap();
+        let s3 = AmazonS3Builder::new()
+            .with_bucket_name("lakesoul-test-s3")
+            .with_region("us-east-1")
+            .with_endpoint("http://localhost:9002")
+            .with_access_key_id("minioadmin1")
+            .with_secret_access_key("minioadmin1")
+            .with_allow_http(true)
+            .build()?;  
+        runtime.register_object_store(&url, Arc::new(s3));
+        let config = SessionConfig::new();
+        let state = SessionState::new_with_config_rt(config, runtime);
+        let context = SessionContext::new_with_state(state);
+        let dataframe = context.read_parquet("s3://lakesoul-test-s3/tpch/nation/n_regionkey=0/part-ZAXWM7FBCy4u9Vt0_0002.parquet", Default::default()).await?;
+        dbg!(dataframe.collect().await?);
+        Ok(())
     }
 }

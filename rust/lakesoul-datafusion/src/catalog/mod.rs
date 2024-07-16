@@ -38,14 +38,17 @@ pub(crate) async fn create_table(client: MetaDataClientRef, table_name: &str, co
         .create_table(TableInfo {
             table_id: format!("table_{}", uuid::Uuid::new_v4()),
             table_name: table_name.to_string(),
-            table_path: format!(
+            table_path: if config.prefix().is_empty() {
+                format!(
                 "file:{}/default/{}",
                 env::current_dir()
                     .unwrap()
                     .to_str()
                     .ok_or(LakeSoulError::Internal("can not get $TMPDIR".to_string()))?,
                 table_name
-            ),
+            )} else {
+                format!("{}/{}", config.prefix(), table_name)
+            },
             table_schema: serde_json::to_string::<ArrowJavaSchema>(&config.target_schema().into())?,
             table_namespace: "default".to_string(),
             properties: serde_json::to_string(&LakeSoulTableProperty {

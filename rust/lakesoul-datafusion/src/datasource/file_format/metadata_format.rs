@@ -351,6 +351,11 @@ impl LakeSoulHashSinkExec {
             debug!("write record_batch with {} rows", batch.num_rows());
             let columnar_values = get_columnar_values(&batch, range_partitions.clone())?;
             let partition_desc = columnar_values_to_partition_desc(&columnar_values);
+            if !partition_desc.eq("n_regionkey=2") {
+                continue;
+            }
+            arrow_cast::pretty::print_batches(&[batch.clone()]);
+
             let batch_excluding_range = batch.project(&schema_projection_excluding_range)?;
             let file_absolute_path = format!(
                 "{}{}part-{}_{:0>4}.parquet",
@@ -379,6 +384,7 @@ impl LakeSoulHashSinkExec {
 
         // TODO: apply rolling strategy
         for (partition_desc, writer) in partitioned_writer.into_iter() {
+            dbg!(&partition_desc, partition);
             let file_absolute_path = writer.absolute_path();
             let num_rows = writer.nun_rows();
             if let Some(file_path_and_row_count) = partitioned_file_path_and_row_count_locked.get_mut(&partition_desc) {
@@ -389,6 +395,8 @@ impl LakeSoulHashSinkExec {
                     .insert(partition_desc.clone(), (vec![file_absolute_path], num_rows));
             }
             writer.flush_and_close().await?;
+            dbg!("writer.flush_and_close().await? finish");
+
         }
 
         Ok(row_count as u64)
@@ -404,11 +412,13 @@ impl LakeSoulHashSinkExec {
             futures::future::join_all(join_handles)
                 .await
                 .iter()
-                .try_fold(0u64, |counter, result| match &result {
+                .try_fold(0u64, |counter, result| {
+                    dbg!(&result);
+                    match &result {
                     Ok(Ok(count)) => Ok(counter + count),
                     Ok(Err(e)) => Err(DataFusionError::Execution(format!("{}", e))),
                     Err(e) => Err(DataFusionError::Execution(format!("{}", e))),
-                })?;
+                }})?;
         let partitioned_file_path_and_row_count = partitioned_file_path_and_row_count.lock().await;
 
         for (partition_desc, (files, _)) in partitioned_file_path_and_row_count.iter() {
@@ -518,7 +528,7 @@ impl ExecutionPlan for LakeSoulHashSinkExec {
         let write_id = rand::distributions::Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
 
         let partitioned_file_path_and_row_count = Arc::new(Mutex::new(HashMap::<String, (Vec<String>, u64)>::new()));
-        for i in 0..num_input_partitions {
+        for i in 0..1 {
             let sink_task = tokio::spawn(Self::pull_and_sink(
                 self.input().clone(),
                 i,

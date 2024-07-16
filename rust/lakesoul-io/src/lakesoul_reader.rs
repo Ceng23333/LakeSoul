@@ -47,6 +47,8 @@ impl LakeSoulReader {
     }
 
     pub async fn start(&mut self) -> Result<()> {
+        let dataframe = self.sess_ctx.read_parquet("s3://lakesoul-test-s3/part-98uJe60VmuKQ3cfL_0003.parquet", Default::default()).await?;
+        dbg!(dataframe.collect().await?);
         let target_schema: SchemaRef = self.config.target_schema.0.clone();
         if self.config.files.is_empty() {
             Err(DataFusionError::Internal(

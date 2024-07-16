@@ -130,6 +130,10 @@ impl LakeSoulIOConfig {
     pub fn aux_sort_cols_slice(&self) -> &[String] {
         &self.aux_sort_cols
     }
+
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
 }
 
 #[derive(Derivative, Debug)]
@@ -340,6 +344,7 @@ pub fn register_s3_object_store(url: &Url, config: &LakeSoulIOConfig, runtime: &
                     )))
                     .map_err(|e| External(Box::new(e)))?;
                 let endpoint_s = endpoint_url.to_string();
+                dbg!(&endpoint_s);
                 endpoint = endpoint_s.strip_suffix('/').map(|s| s.to_string()).or(Some(endpoint_s));
             }
         }

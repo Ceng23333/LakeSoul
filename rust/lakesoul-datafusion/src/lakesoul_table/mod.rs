@@ -15,6 +15,7 @@ use datafusion::{
     execution::context::{SessionContext, SessionState},
     logical_expr::LogicalPlanBuilder,
 };
+use lakesoul_io::lakesoul_io_config::LakeSoulIOConfigBuilder;
 use lakesoul_io::{lakesoul_io_config::create_session_context_with_planner, lakesoul_reader::RecordBatch};
 use lakesoul_metadata::{MetaDataClient, MetaDataClientRef};
 use proto::proto::entity::TableInfo;
@@ -78,9 +79,9 @@ impl LakeSoulTable {
         })
     }
 
-    pub async fn upsert_dataframe(&self, dataframe: DataFrame) -> Result<()> {
+    pub async fn upsert_dataframe(&self, dataframe: DataFrame, builder: LakeSoulIOConfigBuilder) -> Result<()> {
         let client = Arc::new(MetaDataClient::from_env().await?);
-        let builder = create_io_config_builder(client, None, false, self.table_namespace()).await?;
+        // let builder = create_io_config_builder(client, None, false, self.table_namespace()).await?;
         let sess_ctx =
             create_session_context_with_planner(&mut builder.clone().build(), Some(LakeSoulQueryPlanner::new_ref()))?;
 
@@ -94,10 +95,11 @@ impl LakeSoulTable {
         .build()?;
         let dataframe = DataFrame::new(sess_ctx.state(), logical_plan);
 
-        let _results = dataframe
+        let results = dataframe
             // .explain(true, false)?
             .collect()
             .await?;
+        dbg!(results);
 
         Ok(())
     }

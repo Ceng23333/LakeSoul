@@ -78,11 +78,17 @@ mod integration_tests {
             let builder = LakeSoulIOConfigBuilder::new()
                 .with_schema(Arc::new(schema))
                 .with_primary_keys(get_tbl_tpch_table_primary_keys(table))
-                .with_range_partitions(get_tbl_tpch_table_range_partitions(table));
+                .with_range_partitions(get_tbl_tpch_table_range_partitions(table))
+                .with_prefix("s3://lakesoul-test-s3/tpch".to_string())
+                .with_object_store_option("fs.s3a.access.key".to_string(), "minioadmin1".to_string())
+                .with_object_store_option("fs.s3a.secret.key".to_string(), "minioadmin1".to_string())
+                .with_object_store_option("fs.s3a.endpoint".to_string(), "http://localhost:9002".to_string())
+                .with_object_store_option("fs.s3a.path.style.access".to_string(), "true".to_string())
+                ;
 
-            create_table(client.clone(), &table, builder.build()).await?;
+            create_table(client.clone(), &table, builder.clone().build()).await?;
             let lakesoul_table = LakeSoulTable::for_name(table).await?;
-            lakesoul_table.upsert_dataframe(dataframe).await?;
+            lakesoul_table.upsert_dataframe(dataframe, builder).await?;
             // arrow_cast::pretty::print_batches(&lakesoul_table.to_dataframe(&ctx).await?.collect().await?);
             dbg!(table);
         }

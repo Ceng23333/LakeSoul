@@ -1,0 +1,1 @@
+lakesoul_home=/Users/ceng/yugabyte.property TPCH_DATA=`realpath ../../lakesoul/test_files/tpch/data` cargo test load_tpch_data --package lakesoul-datafusion --features=ci -- --nocapture

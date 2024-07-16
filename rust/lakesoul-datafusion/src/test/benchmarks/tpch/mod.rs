@@ -6,7 +6,11 @@ mod run;
 use arrow::datatypes::{DataType, Field, Schema, SchemaBuilder};
 
 pub const TPCH_TABLES: &[&str] = &[
-    "part", "supplier", "partsupp", "customer", "orders", "lineitem", "nation", "region",
+    // "part", 
+    // "supplier", "partsupp", "customer", "orders", 
+    // "lineitem", 
+    "nation",
+    //  "region",
 ];
 
 pub fn get_tbl_tpch_table_primary_keys(table: &str) -> Vec<String> {
@@ -23,7 +27,9 @@ pub fn get_tbl_tpch_table_primary_keys(table: &str) -> Vec<String> {
 
         "lineitem" => vec![String::from("l_orderkey"), String::from("l_partkey")],
 
-        "nation" => vec![String::from("n_nationkey"), String::from("n_name")],
+        "nation" => vec![String::from("n_nationkey"),
+        //  String::from("n_name")
+         ],
 
         "region" => vec![String::from("r_regionkey"), String::from("r_name")],
 
@@ -59,7 +65,7 @@ pub fn get_tbl_tpch_table_range_partitions(table: &str) -> Vec<String> {
 /// The `.tbl` file contains a tailing column
 pub fn get_tbl_tpch_table_schema(table: &str) -> Schema {
     let mut schema = SchemaBuilder::from(get_tpch_table_schema(table).fields);
-    // schema.push(Field::new("__placeholder", DataType::Utf8, true));
+    schema.push(Field::new("__placeholder", DataType::Utf8, true));
     schema.finish()
 }
 
@@ -145,7 +151,7 @@ pub fn get_tpch_table_schema(table: &str) -> Schema {
         "nation" => Schema::new(vec![
             Field::new("n_nationkey", DataType::Int64, false),
             Field::new("n_name", DataType::Utf8, false),
-            // Field::new("n_regionkey", DataType::Int64, false),
+            Field::new("n_regionkey", DataType::Int64, false),
             Field::new("n_comment", DataType::Utf8, false),
         ]),
 
