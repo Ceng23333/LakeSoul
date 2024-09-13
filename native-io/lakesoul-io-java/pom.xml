@@ -685,7 +685,7 @@ SPDX-License-Identifier: Apache-2.0
                             <shadedPattern>com.lakesoul.shaded.org.apache.arrow</shadedPattern>
                             <excludes>
                                 <exclude>org.apache.arrow.c.jni.*</exclude>
-                                <exclude>org.apache.arrow.c.Data*</exclude>
+                                <exclude>org.apache.arrow.c.shaded*</exclude>
                                 <exclude>org.apache.arrow.c.Format*</exclude>
                                 <exclude>org.apache.arrow.c.Flags*</exclude>
                                 <exclude>org.apache.arrow.c.Metadata*</exclude>

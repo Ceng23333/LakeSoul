@@ -9,7 +9,7 @@ import jnr.ffi.Pointer;
 import jnr.ffi.Runtime;
 import jnr.ffi.byref.IntByReference;
 import org.apache.arrow.c.ArrowSchema;
-import org.apache.arrow.c.Data;
+import org.apache.arrow.c.shaded.Data;
 import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.io.IOException;

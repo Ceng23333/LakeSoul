@@ -5,8 +5,9 @@
 package com.dmetasoul.lakesoul
 
 import com.dmetasoul.lakesoul.lakesoul.io.NativeIOReader
-import org.apache.arrow.c.{ArrowArray, CDataDictionaryProvider, Data}
+import org.apache.arrow.c.{ArrowArray, CDataDictionaryProvider}
 import org.apache.arrow.vector.VectorSchemaRoot
+import org.apache.arrow.c.shaded.Data
 
 case class LakeSoulArrowReader(reader: NativeIOReader,
                                timeout: Int = 10000) extends AutoCloseable {
