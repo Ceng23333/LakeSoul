@@ -55,7 +55,7 @@ public class LakeSoulMultiTableSinkStreamBuilder {
     }
 
     public DataStreamSink<BinarySourceRecord> buildLakeSoulDMLSink(DataStream<BinarySourceRecord> stream) {
-        context.conf.set(DYNAMIC_BUCKETING, false);
+//        context.conf.set(DYNAMIC_BUCKETING, false);
         if (!context.conf.contains(AUTO_SCHEMA_CHANGE)) {
             context.conf.set(AUTO_SCHEMA_CHANGE, true);
         }
