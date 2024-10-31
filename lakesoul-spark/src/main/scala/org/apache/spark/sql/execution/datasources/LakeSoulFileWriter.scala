@@ -34,14 +34,21 @@ import org.apache.spark.sql.lakesoul.sources.LakeSoulSQLConf
 import org.apache.spark.sql.vectorized.ArrowFakeRowAdaptor
 import org.apache.spark.util.{SerializableConfiguration, Utils}
 import com.dmetasoul.lakesoul.meta.DBConfig.{LAKESOUL_NON_PARTITION_TABLE_PART_DESC, LAKESOUL_RANGE_PARTITION_SPLITTER}
+import com.dmetasoul.lakesoul.meta.DBUtil
 import com.dmetasoul.lakesoul.spark.clean.CleanOldCompaction.splitCompactFilePath
-import org.apache.spark.sql.lakesoul.DelayedCopyCommitProtocol
+import org.apache.spark.sql.execution.datasources.v2.parquet.{NativeParquetCompactionColumnarOutputWriter, NativeParquetOutputWriter}
+import org.apache.spark.sql.lakesoul.{DelayedCommitProtocol, DelayedCopyCommitProtocol}
 import org.apache.spark.sql.types.{DataTypes, StringType, StructField, StructType}
 
 import java.util.{Date, UUID}
+import scala.collection.JavaConverters.mapAsScalaMapConverter
+import scala.collection.convert.ImplicitConversions.`iterable AsScalaIterable`
 
 /** A helper object for writing FileFormat data out to a location. */
 object LakeSoulFileWriter extends Logging {
+  val MAX_FILE_SIZE_KEY = "max_file_size"
+  val HASH_BUCKET_ID_KEY = "hash_bucket_id"
+
   /**
     * Basic work flow of this command is:
     * 1. Driver side setup, including output committer initialization and data source specific
@@ -178,7 +185,11 @@ object LakeSoulFileWriter extends Logging {
     val nativeIOEnable = sparkSession.sessionState.conf.getConf(LakeSoulSQLConf.NATIVE_IO_ENABLE)
 
     def nativeWrap(plan: SparkPlan): RDD[InternalRow] = {
-      if (isCompaction && !isCDC && !isBucketNumChanged && nativeIOEnable) {
+      if (isCompaction
+        && staticBucketId != -1
+        && !isCDC
+        && !isBucketNumChanged
+        && nativeIOEnable) {
         plan match {
           case withPartitionAndOrdering(_, _, child) =>
             return nativeWrap(child)
@@ -410,6 +421,7 @@ object LakeSoulFileWriter extends Logging {
     private var recordsInFile: Long = _
     private val partValue: Option[String] = options.get("partValue").filter(_ != LAKESOUL_NON_PARTITION_TABLE_PART_DESC)
       .map(_.replace(LAKESOUL_RANGE_PARTITION_SPLITTER, "/"))
+    private val maxFileSize = options.get(MAX_FILE_SIZE_KEY)
 
     /** Given an input row, returns the corresponding `bucketId` */
     protected lazy val getBucketId: InternalRow => Int = {
@@ -419,26 +431,56 @@ object LakeSoulFileWriter extends Logging {
       row => proj(row).getInt(0)
     }
 
+    override protected def releaseCurrentWriter(): Unit = {
+      if (currentWriter != null) {
+        try {
+          currentWriter.close()
+          if (maxFileSize.isDefined) {
+            currentWriter.asInstanceOf[NativeParquetOutputWriter].flushResult.foreach(result => {
+              val (partitionDesc, flushResult) = result
+              val partitionDescList = if (partitionDesc == "-4") {
+                DBUtil.parsePartitionDesc(options.getOrElse("partValue", LAKESOUL_NON_PARTITION_TABLE_PART_DESC)).asScala.toList
+              } else {
+                DBUtil.parsePartitionDesc(partitionDesc).asScala.toList
+              }
+              committer.asInstanceOf[DelayedCommitProtocol].addOutputFile(partitionDescList, flushResult.map(_.getFilePath).toList)
+            })
+          }
+          statsTrackers.foreach(_.closeFile(currentWriter.path()))
+        } finally {
+          currentWriter = null
+        }
+      }
+    }
+
     private def newOutputWriter(record: InternalRow): Unit = {
       recordsInFile = 0
       releaseResources()
 
       val ext = description.outputWriterFactory.getFileExtension(taskAttemptContext)
       val suffix = if (bucketSpec.isDefined) {
-        val bucketIdStr = if (partitionId == -1) {
-          BucketingUtils.bucketIdToString(getBucketId(record))
+        val bucketId = if (partitionId == -1) {
+          getBucketId(record)
         } else {
-          BucketingUtils.bucketIdToString(partitionId)
+          partitionId
         }
+        taskAttemptContext.getConfiguration.set(HASH_BUCKET_ID_KEY, bucketId.toString)
+
+        val bucketIdStr = BucketingUtils.bucketIdToString(bucketId)
         f"$bucketIdStr.c$fileCounter%03d" + ext
       } else {
         f"-c$fileCounter%03d" + ext
       }
 
+      if (maxFileSize.isDefined) {
+        taskAttemptContext.getConfiguration.set(MAX_FILE_SIZE_KEY, maxFileSize.get)
+      }
+
       val currentPath = committer.newTaskTempFile(
         taskAttemptContext,
         partValue,
-        suffix)
+        if (maxFileSize.isDefined) "" else suffix
+      )
 
       currentWriter = description.outputWriterFactory.newInstance(
         path = currentPath,

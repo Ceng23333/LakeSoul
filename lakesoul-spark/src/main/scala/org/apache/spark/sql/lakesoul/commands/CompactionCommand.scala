@@ -14,6 +14,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.PredicateHelper
 import org.apache.spark.sql.connector.catalog.CatalogManager.SESSION_CATALOG_NAME
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
+import org.apache.spark.sql.execution.datasources.LakeSoulFileWriter.MAX_FILE_SIZE_KEY
 import org.apache.spark.sql.execution.datasources.v2.merge.MergeDeltaParquetScan
 import org.apache.spark.sql.execution.datasources.v2.parquet.{NativeParquetScan, ParquetScan}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
@@ -130,6 +131,9 @@ case class CompactionCommand(snapshotManagement: SnapshotManagement,
     if (readPartitionInfo.nonEmpty) {
       map.put("partValue", readPartitionInfo.head.range_value)
     }
+    if (fileSizeLimit.isDefined) {
+      map.put(MAX_FILE_SIZE_KEY, fileSizeLimit.get.toString)
+    }
     if (bucketNumChanged) {
       map.put("newBucketNum", newBucketNum.get.toString)
     } else if (tableInfo.hash_partition_columns.nonEmpty) {
@@ -198,7 +202,8 @@ case class CompactionCommand(snapshotManagement: SnapshotManagement,
     val bucketedFiles = if (tableInfo.hash_partition_columns.isEmpty || bucketNumChanged) {
       Seq(-1 -> files)
     } else {
-      files.groupBy(_.file_bucket_id)
+      Seq(-1 -> files)
+      //      files.groupBy(_.file_bucket_id)
     }
     val compactionPath = newCompactPath
     val allDataCommitInfo = bucketedFiles.flatMap(groupByBucketId => {
@@ -244,11 +249,7 @@ case class CompactionCommand(snapshotManagement: SnapshotManagement,
         } else {
           logInfo(s"== Partition ${sourcePartition.range_value} has no increment file.")
           val origCompactedFile = files.head
-          if (sparkSession.sessionState.conf.getConf(RENAME_COMPACTED_FILE)) {
-            renameOldCompactedFile(tc, origCompactedFile, sourcePartition.range_value, compactionPath)
-          } else {
-            executeCompaction(sparkSession, tc, files, Array(sourcePartition), compactionPath, fullCompaction, origCompactedFile.path)
-          }
+          executeCompaction(sparkSession, tc, files, Array(sourcePartition), compactionPath, fullCompaction, origCompactedFile.path)
         }
       })
     })
