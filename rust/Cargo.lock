@@ -1962,6 +1962,8 @@ dependencies = [
  "arrow",
  "arrow-arith",
  "arrow-cast",
+ "arrow-flight",
+ "arrow-ipc",
  "async-trait",
  "bytes",
  "chrono",
@@ -1982,13 +1984,14 @@ dependencies = [
  "test-log",
  "thiserror",
  "tokio",
+ "tonic",
  "tracing",
  "url",
  "uuid",
 ]
 
 [[package]]
-name = "lakesoul-flight"
+name = "lakesoul-examples"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
@@ -1997,6 +2000,7 @@ dependencies = [
  "arrow-schema",
  "datafusion",
  "futures",
+ "lakesoul-datafusion",
  "prost",
  "tokio",
  "tonic",

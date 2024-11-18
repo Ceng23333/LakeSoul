@@ -9,9 +9,11 @@ extern crate core;
 mod catalog;
 mod datasource;
 mod error;
+pub use error::{Result, LakeSoulError};
 mod lakesoul_table;
 mod planner;
 mod serialize;
+pub mod flight;
 
 #[cfg(test)]
 mod test;
