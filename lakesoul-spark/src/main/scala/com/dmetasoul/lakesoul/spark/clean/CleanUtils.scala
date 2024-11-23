@@ -8,7 +8,6 @@ import com.dmetasoul.lakesoul.meta.DBConnector
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types.{BooleanType, DateType, DecimalType, DoubleType, FloatType, IntegerType, LongType, StringType, StructField, StructType, TimestampType}
 
-import java.io.Closeable
 import java.sql.ResultSet
 import java.util
 import scala.collection.mutable.ArrayBuffer
@@ -161,7 +160,7 @@ object CleanUtils {
     sqlToDataframe(sql, spark)
   }
 
-  def tryWithResource[R <: Closeable, T](createResource: => R)(f: R => T): T = {
+  def tryWithResource[R <: AutoCloseable, T](createResource: => R)(f: R => T): T = {
     val resource = createResource
     try f.apply(resource) finally resource.close()
   }
