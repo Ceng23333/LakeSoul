@@ -15,7 +15,6 @@ import java.util.TimeZone
 
 object CleanExpiredData {
 
-  private var conn = DBConnector.getConn
   var serverTimeZone = TimeZone.getDefault.getID
   private var defaultPartitionTTL: Int = -1
   private var defaultRedundantTTL: Int = -1
@@ -215,10 +214,7 @@ object CleanExpiredData {
          |    partition_desc='$partitionDesc')
          |""".stripMargin
 
-    if (!conn.isValid(1000)) {
-      conn.close()
-      conn = DBConnector.getConn
-    }
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
     stmt.close()
@@ -235,10 +231,7 @@ object CleanExpiredData {
          |AND
          |    timestamp < $deadTimestamp
          |""".stripMargin
-    if (!conn.isValid(1000)) {
-      conn.close()
-      conn = DBConnector.getConn
-    }
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
     stmt.close()

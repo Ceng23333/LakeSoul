@@ -14,8 +14,6 @@ import scala.collection.mutable.ArrayBuffer
 
 object CleanUtils {
 
-  private val conn = DBConnector.getConn
-
   def createStructField(name: String, colType: String): StructField = {
     colType match {
       case "java.lang.String" => StructField(name, StringType, nullable = true)
@@ -73,6 +71,7 @@ object CleanUtils {
   }
 
   def sqlToDataframe(sql: String, spark: SparkSession): DataFrame = {
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     val resultSet = stmt.executeQuery()
     createResultSetToDF(resultSet, spark)
@@ -85,6 +84,7 @@ object CleanUtils {
          |SET properties = properties::jsonb || '{"partition.ttl": "$expiredDays"}'::jsonb
          |WHERE table_id = (SELECT table_id from table_info where table_path='$tablePath');
          |""".stripMargin
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
   }
@@ -96,6 +96,7 @@ object CleanUtils {
          |SET properties = properties::jsonb || '{"compaction.ttl": "$expiredDays"}'::jsonb
          |WHERE table_id = (SELECT table_id from table_info where table_path='$tablePath');
          |""".stripMargin
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
   }
@@ -107,6 +108,7 @@ object CleanUtils {
          |SET properties = properties::jsonb || '{"only_save_once_compaction": "$value"}'::jsonb
          |WHERE table_id = (SELECT table_id from table_info where table_path='$tablePath');
          |""".stripMargin
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
   }
@@ -118,6 +120,7 @@ object CleanUtils {
          |SET properties = properties::jsonb - 'partition.ttl'
          |WHERE table_id = (SELECT table_id from table_info where table_path='$tablePath');
          |""".stripMargin
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
   }
@@ -129,6 +132,7 @@ object CleanUtils {
          |SET properties = properties::jsonb - 'compaction.ttl'
          |WHERE table_id = (SELECT table_id from table_info where table_path='$tablePath');
          |""".stripMargin
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
   }
@@ -141,6 +145,7 @@ object CleanUtils {
          |WHERE table_id = '$tableId'
          |AND version = $version
          |""".stripMargin
+    val conn = DBConnector.getConn
     val stmt = conn.prepareStatement(sql)
     stmt.execute()
   }
