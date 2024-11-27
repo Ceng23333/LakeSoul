@@ -15,7 +15,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.PredicateHelper
 import org.apache.spark.sql.connector.catalog.CatalogManager.SESSION_CATALOG_NAME
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
-import org.apache.spark.sql.execution.datasources.LakeSoulFileWriter.{MAX_FILE_SIZE_KEY, SNAPPY_COMPRESS_RATIO}
+import org.apache.spark.sql.execution.datasources.LakeSoulFileWriter.{MAX_FILE_SIZE_KEY, NEW_FILE_WHEN_DISORDERED_KEY, SNAPPY_COMPRESS_RATIO}
 import org.apache.spark.sql.execution.datasources.v2.merge.MergeDeltaParquetScan
 import org.apache.spark.sql.execution.datasources.v2.parquet.{NativeParquetScan, ParquetScan}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
@@ -137,8 +137,13 @@ case class CompactionCommand(snapshotManagement: SnapshotManagement,
     if (readPartitionInfo.nonEmpty) {
       map.put("partValue", readPartitionInfo.head.range_value)
     }
-    if (fileSizeLimit.isDefined) {
+    if (fileSizeLimit.isDefined || fileNumLimit.isDefined) {
       map.put("fullCompaction", "false")
+    }
+    if (fileNumLimit.isDefined) {
+      map.put(NEW_FILE_WHEN_DISORDERED_KEY, "true")
+    }
+    if (fileSizeLimit.isDefined) {
       map.put(MAX_FILE_SIZE_KEY, (fileSizeLimit.get * SNAPPY_COMPRESS_RATIO).toString)
     }
     if (bucketNumChanged) {

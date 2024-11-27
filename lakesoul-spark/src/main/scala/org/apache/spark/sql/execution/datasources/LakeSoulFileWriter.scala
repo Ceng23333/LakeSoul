@@ -38,7 +38,7 @@ import com.dmetasoul.lakesoul.meta.DBUtil
 import com.dmetasoul.lakesoul.spark.clean.CleanOldCompaction.splitCompactFilePath
 import org.apache.spark.sql.execution.datasources.v2.parquet.{NativeParquetCompactionColumnarOutputWriter, NativeParquetOutputWriter}
 import org.apache.spark.sql.lakesoul.{DelayedCommitProtocol, DelayedCopyCommitProtocol}
-import org.apache.spark.sql.types.{DataTypes, StringType, StructField, StructType}
+import org.apache.spark.sql.types._
 
 import java.util.{Date, UUID}
 import scala.collection.JavaConverters.mapAsScalaMapConverter
@@ -47,6 +47,7 @@ import scala.collection.convert.ImplicitConversions.`iterable AsScalaIterable`
 /** A helper object for writing FileFormat data out to a location. */
 object LakeSoulFileWriter extends Logging {
   val MAX_FILE_SIZE_KEY = "max_file_size"
+  val NEW_FILE_WHEN_DISORDERED_KEY = "new_file_when_disordered"
   val HASH_BUCKET_ID_KEY = "hash_bucket_id"
   val SNAPPY_COMPRESS_RATIO = 3
   val COPY_FILE_WRITER_KEY = "copy_file_writer"
@@ -425,6 +426,8 @@ object LakeSoulFileWriter extends Logging {
     private val partValue: Option[String] = options.get("partValue").filter(_ != LAKESOUL_NON_PARTITION_TABLE_PART_DESC)
       .map(_.replace(LAKESOUL_RANGE_PARTITION_SPLITTER, "/"))
     private val maxFileSize = options.get(MAX_FILE_SIZE_KEY)
+    private var lastKeyRow: InternalRow = _
+    private val newFileWhenDisordered = taskAttemptContext.getConfiguration.get(NEW_FILE_WHEN_DISORDERED_KEY, "false").toBoolean
 
     /** Given an input row, returns the corresponding `bucketId` */
     protected lazy val getBucketId: InternalRow => Int = {
@@ -461,9 +464,19 @@ object LakeSoulFileWriter extends Logging {
       }
     }
 
+    private lazy val keyProjection = bucketSpec.map(spec => {
+      val bucketColumns = spec.bucketColumnNames.map(name =>
+        description.allColumns.find(_.name == name).getOrElse(
+          throw new IllegalArgumentException(s"Bucket column $name not found in schema")
+        )
+      )
+      UnsafeProjection.create(bucketColumns, description.allColumns)
+    })
+
     private def newOutputWriter(record: InternalRow): Unit = {
       recordsInFile = 0
       releaseResources()
+      lastKeyRow = null
 
       val ext = description.outputWriterFactory.getFileExtension(taskAttemptContext)
       val suffix = if (bucketSpec.isDefined) {
@@ -496,12 +509,16 @@ object LakeSoulFileWriter extends Logging {
         context = taskAttemptContext)
 
       statsTrackers.foreach(_.newFile(currentPath))
+
+      if (bucketSpec.isDefined && newFileWhenDisordered) {
+        lastKeyRow = keyProjection.get(record).copy()
+      }
     }
 
     override def write(record: InternalRow): Unit = {
       if (currentWriter == null) {
         newOutputWriter(record)
-      } else if (description.maxRecordsPerFile > 0 && recordsInFile >= description.maxRecordsPerFile) {
+      } else if (shouldCreateNewFile(record)) {
         fileCounter += 1
         assert(fileCounter < MAX_FILE_COUNTER,
           s"File counter $fileCounter is beyond max value $MAX_FILE_COUNTER")
@@ -512,6 +529,75 @@ object LakeSoulFileWriter extends Logging {
       currentWriter.write(record)
       statsTrackers.foreach(_.newRow(currentWriter.path, record))
       recordsInFile += 1
+    }
+
+    private def shouldCreateNewFile(record: InternalRow): Boolean = {
+      // 只在以下两种情况创建新文件：
+      // 1. 有bucketSpec且当前主键小于上一个主键
+      // 2. 达到每个文件的最大记录数
+      if (bucketSpec.isDefined) {
+        val currentKeyRow = keyProjection.get(record)
+        val needNewFile = compareKeys(currentKeyRow, lastKeyRow) < 0
+        
+        if (needNewFile) {
+          lastKeyRow = currentKeyRow.copy()
+          true
+        } else {
+          lastKeyRow = currentKeyRow.copy()
+          description.maxRecordsPerFile > 0 && recordsInFile >= description.maxRecordsPerFile
+        }
+      } else {
+        description.maxRecordsPerFile > 0 && recordsInFile >= description.maxRecordsPerFile
+      }
+    }
+
+    // 比较两行的主键值
+    private def compareKeys(current: InternalRow, last: InternalRow): Int = {
+      if (current == null || last == null) return 0
+
+      val keyColumns = bucketSpec.get.bucketColumnNames.map(name =>
+        description.allColumns.find(_.name == name).getOrElse(
+          throw new IllegalArgumentException(s"Bucket column $name not found in schema")
+        )
+      )
+
+      // 逐列比较主键值
+      for (i <- keyColumns.indices) {
+        val comparison = compareColumn(current, last, i, keyColumns(i).dataType)
+        if (comparison != 0) return comparison
+      }
+      0
+    }
+
+    // 比较单个列的值
+    private def compareColumn(row1: InternalRow, row2: InternalRow, ordinal: Int, dataType: DataType): Int = {
+      if (row1.isNullAt(ordinal) && row2.isNullAt(ordinal)) return 0
+      if (row1.isNullAt(ordinal)) return -1
+      if (row2.isNullAt(ordinal)) return 1
+
+      dataType match {
+        case StringType =>
+          row1.getUTF8String(ordinal).compareTo(row2.getUTF8String(ordinal))
+        case IntegerType =>
+          row1.getInt(ordinal).compareTo(row2.getInt(ordinal))
+        case LongType =>
+          row1.getLong(ordinal).compareTo(row2.getLong(ordinal))
+        case DoubleType =>
+          row1.getDouble(ordinal).compareTo(row2.getDouble(ordinal))
+        case FloatType =>
+          row1.getFloat(ordinal).compareTo(row2.getFloat(ordinal))
+        case DecimalType() =>
+          row1.getDecimal(ordinal, dataType.asInstanceOf[DecimalType].precision,
+            dataType.asInstanceOf[DecimalType].scale)
+            .compareTo(row2.getDecimal(ordinal, dataType.asInstanceOf[DecimalType].precision,
+              dataType.asInstanceOf[DecimalType].scale))
+        case TimestampType =>
+          row1.getLong(ordinal).compareTo(row2.getLong(ordinal))
+        case DateType =>
+          row1.getInt(ordinal).compareTo(row2.getInt(ordinal))
+        case _ =>
+          throw new UnsupportedOperationException(s"Unsupported data type for comparison: $dataType")
+      }
     }
   }
 

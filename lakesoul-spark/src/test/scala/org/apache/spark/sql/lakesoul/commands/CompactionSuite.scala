@@ -23,7 +23,7 @@ import org.apache.spark.sql.lakesoul.sources.LakeSoulSQLConf
 import org.apache.spark.sql.lakesoul.test.{LakeSoulSQLCommandTest, LakeSoulTestSparkSession, MergeOpInt}
 import org.apache.spark.sql.lakesoul.utils.{SparkUtil, TableInfo}
 import org.apache.spark.sql.test.{SharedSparkSession, TestSparkSession}
-import org.apache.spark.sql.{AnalysisException, QueryTest, Row, SparkSession}
+import org.apache.spark.sql.{AnalysisException, DataFrame, QueryTest, Row, SparkSession}
 import org.junit.runner.RunWith
 import org.scalatest.BeforeAndAfterEach
 import org.scalatestplus.junit.JUnitRunner
@@ -519,13 +519,14 @@ class CompactionSuite extends QueryTest
 
   test("compaction with limited file number") {
     withTempDir { tempDir =>
-      //    val tempDir = Utils.createDirectory(System.getProperty("java.io.tmpdir"))
       val tablePath = tempDir.getCanonicalPath
       val spark = SparkSession.active
 
       val hashBucketNum = 4
       val compactRounds = 5
-      val dataPerRounds = 10
+      val upsertPerRounds = 5
+      val startIdGap = 501
+      val rowsPerUpsert = 1000
       val compactGroupSize = 3
 
       // Create test data
@@ -550,10 +551,9 @@ class CompactionSuite extends QueryTest
 
       for (c <- 0 until compactRounds) {
         // Simulate multiple append operations
-        for (i <- c * dataPerRounds + 1 to (c + 1) * dataPerRounds) {
-          val appendDf = Seq(
-            (i * 10, s"2023-02-0$i", i * 100, 1)
-          ).toDF("id", "date", "value", "range")
+        for (i <- c * upsertPerRounds + 1 to (c + 1) * upsertPerRounds) {
+          val startId = i * startIdGap
+          val appendDf = createTestDataFrame(startId, i, rowsPerUpsert, false)
           lakeSoulTable.upsert(appendDf)
         }
 
@@ -574,33 +574,35 @@ class CompactionSuite extends QueryTest
         lakeSoulTable.toDF.show
 
         // Verify results
-        assert(compactedFileCount <= hashBucketNum,
-          s"Compaction should have hashBucketNum files, but it has $compactedFileCount")
+        //        assert(compactedFileCount <= hashBucketNum,
+        //          s"Compaction should have hashBucketNum files, but it has $compactedFileCount")
 
 
-        //        assert(compactedFileCount >= (initialFileCount - 1) / compactGroupSize + 1,
-        //          s"Compaction should produce files above a lower bound, but there are ${compactedFileCount} files")
-        //
-        //        assert(compactedFileCount <= (initialFileCount - 1) / compactGroupSize + 1 + hashBucketNum,
-        //          s"Compaction should produce files below a upper bound, but there are ${compactedFileCount} files")
+        assert(compactedFileCount >= (initialFileCount - 1) / compactGroupSize + 1,
+          s"Compaction should produce files above a lower bound, but there are ${compactedFileCount} files")
+
+        assert(compactedFileCount <= (initialFileCount - 1) / compactGroupSize + 1 + hashBucketNum,
+          s"Compaction should produce files below a upper bound, but there are ${compactedFileCount} files")
       }
 
       // Verify data integrity
       val compactedData = lakeSoulTable.toDF.orderBy("id", "date").collect()
-      println(compactedData.mkString("Array(", ", ", ")"))
-      assert(compactedData.length == 5 + dataPerRounds * compactRounds, s"The compressed data should have ${5 + dataPerRounds * compactRounds} rows, but it actually has ${compactedData.length} rows")
+      val expectedRows = 5 + startIdGap * upsertPerRounds * compactRounds - startIdGap + rowsPerUpsert
+      assert(compactedData.length == expectedRows,
+        s"The compressed data should have $expectedRows rows (initial 5 + ($startIdGap * $upsertPerRounds * $compactRounds - $startIdGap) + $rowsPerUpsert rows), but it actually has ${compactedData.length} rows")
     }
   }
 
   test("compaction cdc table with limited file number") {
     withTempDir { tempDir =>
-      //    val tempDir = org.apache.spark.util.Utils.createDirectory(System.getProperty("java.io.tmpdir"))
       val tablePath = tempDir.getCanonicalPath
       val spark = SparkSession.active
 
       val hashBucketNum = 4
       val compactRounds = 5
-      val dataPerRounds = 10
+      val upsertPerRounds = 5
+      val startIdGap = 500
+      val rowsPerUpsert = 1001
       val compactGroupSize = 3
 
       // Create test data
@@ -609,7 +611,8 @@ class CompactionSuite extends QueryTest
         (2, "2023-01-02", 20, 1, "insert"),
         (3, "2023-01-03", 30, 1, "insert"),
         (4, "2023-01-04", 40, 1, "insert"),
-        (5, "2023-01-05", 50, 1, "insert")
+        (5, "2023-01-05", 50, 1, "insert"),
+        (startIdGap - 1, "2023-01-05", 50, 1, "insert")
       ).toDF("id", "date", "value", "range", "op")
 
       // Write initial data
@@ -626,24 +629,14 @@ class CompactionSuite extends QueryTest
 
       for (c <- 0 until compactRounds) {
         // Simulate multiple append operations
-        for (i <- c * dataPerRounds + 1 to (c + 1) * dataPerRounds) {
-          val appendDf = if (i % 2 == 0) {
-            Seq(
-              (i * 10, s"2023-02-0$i", i * 100, 1, "insert")
-            ).toDF("id", "date", "value", "range", "op")
-          } else {
-            Seq(
-              (i * 10, s"2023-02-0$i", i * 100, 1, "insert"),
-              (i * 10, s"2023-02-0$i", i * 100, 1, "delete")
-            ).toDF("id", "date", "value", "range", "op")
-          }
-
+        for (i <- c * upsertPerRounds + 1 to (c + 1) * upsertPerRounds) {
+          val startId = i * startIdGap
+          val appendDf = createTestDataFrame(startId, i, rowsPerUpsert)
           lakeSoulTable.upsert(appendDf)
         }
 
         // Get initial PartitionInfo count
         val initialFiles = getFileList(tablePath)
-        println(initialFiles.mkString("Array(", ", ", ")"))
         val initialFileCount = initialFiles.length
         //        println(s"before compact initialPartitionInfoCount=$initialFileCount")
         lakeSoulTable.toDF.show
@@ -661,33 +654,36 @@ class CompactionSuite extends QueryTest
         lakeSoulTable.toDF.show
 
         // Verify results
-        assert(compactedFileCount <= hashBucketNum,
-          s"Compaction should have hashBucketNum files, but it has $compactedFileCount")
+        //        assert(compactedFileCount <= hashBucketNum,
+        //          s"Compaction should have hashBucketNum files, but it has $compactedFileCount")
 
 
-        //        assert(compactedFileCount >= (initialFileCount - 1) / compactGroupSize + 1,
-        //          s"Compaction should produce files above a lower bound, but there are ${compactedFileCount} files")
-        //
-        //        assert(compactedFileCount <= (initialFileCount - 1) / compactGroupSize + 1 + hashBucketNum,
-        //          s"Compaction should produce files below a upper bound, but there are ${compactedFileCount} files")
+        assert(compactedFileCount >= (initialFileCount - 1) / compactGroupSize + 1,
+          s"Compaction should produce files above a lower bound, but there are ${compactedFileCount} files")
+
+        assert(compactedFileCount <= (initialFileCount - 1) / compactGroupSize + 1 + hashBucketNum,
+          s"Compaction should produce files below a upper bound, but there are ${compactedFileCount} files")
       }
 
+      LakeSoulTable.uncached(tablePath)
       // Verify data integrity
       val compactedData = lakeSoulTable.toDF.orderBy("id", "date").collect()
-      println(compactedData.mkString("Array(", ", ", ")"))
-      assert(compactedData.length == 5 + dataPerRounds * compactRounds / 2, s"The compressed data should have ${5 + dataPerRounds * compactRounds / 2} rows, but it actually has ${compactedData.length} rows")
+      // CDC表中，每两行会产生一行最终数据（delete-insert对），另外一半是单独的insert
+      val expectedRows = 5 + (startIdGap * upsertPerRounds * compactRounds - startIdGap + rowsPerUpsert + 1) / 2
+      assert(compactedData.length == expectedRows,
+        s"The compressed data should have $expectedRows rows (initial 5 + ($startIdGap * $upsertPerRounds * $compactRounds - $startIdGap + $rowsPerUpsert + 1)/2 due to CDC and last odd record has no delete), but it actually has ${compactedData.length} rows")
     }
   }
 
   test("compaction with limited file size") {
     withTempDir { tempDir =>
-      //    val tempDir = org.apache.spark.util.Utils.createDirectory(System.getProperty("java.io.tmpdir"))
       val tablePath = tempDir.getCanonicalPath
       val spark = SparkSession.active
 
       val hashBucketNum = 4
       val compactRounds = 5
       val upsertPerRounds = 10
+      val startIdGap = 501
       val rowsPerUpsert = 1000
       val compactFileSize = "10KB"
 
@@ -714,13 +710,8 @@ class CompactionSuite extends QueryTest
       for (c <- 0 until compactRounds) {
         // Simulate multiple append operations
         for (i <- c * upsertPerRounds + 1 to (c + 1) * upsertPerRounds) {
-          val appendDf = (0 until rowsPerUpsert)
-            .map(j => (i * 1000 + j, s"2023-02-0$i", i * 100, 1))
-
-            .toDF("id", "date", "value", "range")
-          //          val appendDf = Seq(
-          //            (i * 10, s"2023-02-0$i", i * 100, 1)
-          //          ).toDF("id", "date", "value", "range")
+          val startId = i * startIdGap
+          val appendDf = createTestDataFrame(startId, i, rowsPerUpsert, false)
           lakeSoulTable.upsert(appendDf)
         }
 
@@ -756,22 +747,22 @@ class CompactionSuite extends QueryTest
       // Verify data integrity
       LakeSoulTable.uncached(tablePath)
       val compactedData = lakeSoulTable.toDF.orderBy("id", "date").collect()
-      //      println(compactedData.mkString("Array(", ", ", ")"))
-
-      assert(compactedData.length == 5 + rowsPerUpsert * upsertPerRounds * compactRounds, s"The compressed data should have ${5 + rowsPerUpsert * upsertPerRounds * compactRounds} rows, but it actually has ${compactedData.length} rows")
+      val expectedRows = 5 + startIdGap * upsertPerRounds * compactRounds - startIdGap + rowsPerUpsert
+      assert(compactedData.length == expectedRows,
+        s"The compressed data should have $expectedRows rows (initial 5 + ($startIdGap * $upsertPerRounds * $compactRounds - $startIdGap) + $rowsPerUpsert rows), but it actually has ${compactedData.length} rows")
     }
   }
 
   test("compaction cdc table with limited file size") {
     withTempDir { tempDir =>
-      //    val tempDir = org.apache.spark.util.Utils.createDirectory(System.getProperty("java.io.tmpdir"))
       val tablePath = tempDir.getCanonicalPath
       val spark = SparkSession.active
 
       val hashBucketNum = 4
       val compactRounds = 5
       val upsertPerRounds = 10
-      val rowsPerUpsert = 1000
+      val startIdGap = 500
+      val rowsPerUpsert = 1001
       val compactFileSize = "10KB"
 
       // Create test data
@@ -781,7 +772,7 @@ class CompactionSuite extends QueryTest
         (3, "2023-01-03", 30, 1, "insert"),
         (4, "2023-01-04", 40, 1, "insert"),
         (5, "2023-01-05", 50, 1, "insert"),
-        (rowsPerUpsert - 1, "2023-01-05", 50, 1, "insert")
+        (startIdGap - 1, "2023-01-05", 50, 1, "insert")
       ).toDF("id", "date", "value", "range", "op")
 
       // Write initial data
@@ -799,17 +790,8 @@ class CompactionSuite extends QueryTest
       for (c <- 0 until compactRounds) {
         // Simulate multiple append operations
         for (i <- c * upsertPerRounds + 1 to (c + 1) * upsertPerRounds) {
-          val appendDf = (0 until rowsPerUpsert)
-            .flatMap(j => if (j % 2 == 0) {
-              Seq((i * rowsPerUpsert + j - 1, s"2023-02-0$i", i * 100, 1, "delete"), (i * rowsPerUpsert + j, s"2023-02-0$i", i * 100, 1, "insert"))
-            } else {
-              Seq((i * rowsPerUpsert + j, s"2023-02-0$i", i * 100, 1, "insert"))
-            })
-
-            .toDF("id", "date", "value", "range", "op")
-          //          val appendDf = Seq(
-          //            (i * 10, s"2023-02-0$i", i * 100, 1)
-          //          ).toDF("id", "date", "value", "range")
+          val startId = i * startIdGap
+          val appendDf = createTestDataFrame(startId, i, rowsPerUpsert)
           lakeSoulTable.upsert(appendDf)
         }
 
@@ -849,7 +831,9 @@ class CompactionSuite extends QueryTest
       val compactedData = finalData.collect()
       //      println(compactedData.mkString("Array(", ", ", ")"))
 
-      assert(compactedData.length == 6 + rowsPerUpsert * upsertPerRounds * compactRounds / 2, s"The compressed data should have ${6 + rowsPerUpsert * upsertPerRounds * compactRounds / 2} rows, but it actually has ${compactedData.length} rows")
+      val expectedRows = 5 + (startIdGap * upsertPerRounds * compactRounds - startIdGap + rowsPerUpsert + 1) / 2
+      assert(compactedData.length == expectedRows,
+        s"The compressed data should have $expectedRows rows (initial 5 + ($startIdGap * $upsertPerRounds * $compactRounds - $startIdGap + $rowsPerUpsert + 1)/2 due to CDC and last odd record has no delete), but it actually has ${compactedData.length} rows")
     }
   }
 
@@ -932,146 +916,171 @@ class CompactionSuite extends QueryTest
     sm.getTableInfoOnly
   }
 
+  //  Only use for local test
+  //  test("compaction with concurrent data insertion and compaction") {
+  //    withTempDir { tempDir =>
+  //      //      val tempDir = org.apache.spark.util.Utils.createDirectory(System.getProperty("java.io.tmpdir"))
+  //      val tablePath = tempDir.getCanonicalPath
+  //      //      val spark = SparkSession.active
+  //
+  //      val hashBucketNum = 4
+  //      val compactRounds = 10
+  //      val compactGapMs = 10000
+  //      val upsertRounds = 100
+  //      val upsertGapMs = 100
+  //      val upsertRows = 1024
+  //      val compactGroupSize = 3
+  //      val cdc = true
+  //      val ranges = 2;
+  //
+  //      val fields: util.List[Field] = if (cdc) {
+  //        util.Arrays.asList(
+  //          new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null),
+  //          new Field("date", FieldType.nullable(new ArrowType.Utf8), null),
+  //          new Field("value", FieldType.nullable(new ArrowType.Int(32, true)), null),
+  //          new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null),
+  //          new Field(TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT, FieldType.nullable(new ArrowType.Utf8), null),
+  //        )
+  //      } else {
+  //        util.Arrays.asList(
+  //          new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null),
+  //          new Field("date", FieldType.nullable(new ArrowType.Utf8), null),
+  //          new Field("value", FieldType.nullable(new ArrowType.Int(32, true)), null),
+  //          new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null),
+  //        )
+  //      }
+  //      //      if (cdc) fields = util.Arrays.asList(new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("int", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("utf8", FieldType.nullable(new ArrowType.Utf8), null), new Field("decimal", FieldType.nullable(ArrowType.Decimal.createDecimal(10, 3, null)), null), new Field("boolean", FieldType.nullable(new ArrowType.Bool), null), new Field("date", FieldType.nullable(new ArrowType.Date(DateUnit.DAY)), null), new Field("datetimeSec", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.SECOND, ZoneId.of("UTC").toString)), null), new Field(TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT, FieldType.notNullable(new ArrowType.Utf8), null), new Field("datetimeMilli", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.MILLISECOND, ZoneId.of("UTC").toString)), null))
+  //      //      else fields = util.Arrays.asList(new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("int", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("utf8", FieldType.nullable(new ArrowType.Utf8), null), new Field("decimal", FieldType.nullable(ArrowType.Decimal.createDecimal(10, 3, null)), null), new Field("boolean", FieldType.nullable(new ArrowType.Bool), null), new Field("date", FieldType.nullable(new ArrowType.Date(DateUnit.DAY)), null), new Field("datetimeSec", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.SECOND, ZoneId.of("UTC").toString)), null), new Field("datetimeMilli", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.MILLISECOND, ZoneId.of("UTC").toString)), null))
+  //
+  //      val numCols = fields.size
+  //      // Create test data
+  //      val df = if (cdc) {
+  //        Seq(
+  //          (-1, "2023-01-01", 10, ranges + 1, "insert"),
+  //          (-2, "2023-01-02", 20, ranges + 1, "insert"),
+  //          (-3, "2023-01-03", 30, ranges + 1, "insert"),
+  //          (-4, "2023-01-04", 40, ranges + 1, "insert"),
+  //          (-5, "2023-01-05", 50, ranges + 1, "insert")
+  //        ).toDF("id", "date", "value", "range", TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT)
+  //      } else {
+  //        Seq(
+  //          (1, "2023-01-01", 10, ranges + 1),
+  //          (2, "2023-01-02", 20, ranges + 1),
+  //          (3, "2023-01-03", 30, ranges + 1),
+  //          (4, "2023-01-04", 40, ranges + 1),
+  //          (5, "2023-01-05", 50, ranges + 1)
+  //        ).toDF("id", "date", "value", "range")
+  //      }
+  //
+  //      // Write initial data
+  //      df.write
+  //        .format("lakesoul")
+  //        //        .option("rangePartitions", "range")
+  //        .option("hashPartitions", "id")
+  //        .option(SHORT_TABLE_NAME, "compaction_size_limit_table")
+  //        .option("hashBucketNum", hashBucketNum.toString)
+  //        .option(TableInfoProperty.CDC_CHANGE_COLUMN, TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT)
+  //        .save(tablePath)
+  //
+  //      val lakeSoulTable = LakeSoulTable.forPath(tablePath)
+  //      val insertThread = new Thread {
+  //
+  //        override def run(): Unit = {
+  //          val localWriter = new LakeSoulLocalJavaWriter()
+  //          val params = Map(
+  //            ("lakesoul.pg.url", "jdbc:postgresql://127.0.0.1:5433/test_lakesoul_meta?stringtype=unspecified"),
+  //            ("lakesoul.pg.username", "yugabyte"),
+  //            ("lakesoul.pg.password", "yugabyte"),
+  //            (LakeSoulLocalJavaWriter.TABLE_NAME, "compaction_size_limit_table")
+  //          )
+  //          localWriter.init(params.asJava)
+  //
+  //          for (c <- 0 until upsertRounds) {
+  //            println(s"upsertRound = $c")
+  //            for (i <- c * upsertRows until c * upsertRows + upsertRows) {
+  //              val row: Array[AnyRef] = new Array[AnyRef](if (cdc) {
+  //                numCols - 1
+  //              }
+  //              else {
+  //                numCols
+  //              })
+  //              var j: Int = 0
+  //              var k: Int = 0
+  //              while (j < numCols) {
+  //                if (!fields.get(j).getName.contains(TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT)) {
+  //                  if (fields.get(j).getName.contains("id")) {
+  //                    row(k) = i.asInstanceOf[AnyRef]
+  //                    k += 1
+  //                  }
+  //                  else {
+  //                    if (fields.get(j).getName.contains("range")) {
+  //                      row(k) = (i % ranges).asInstanceOf[AnyRef]
+  //                      k += 1
+  //                    }
+  //                    else {
+  //                      row(k) = fields.get(j).getType.accept(ArrowTypeMockDataGenerator.INSTANCE)
+  //                      k += 1
+  //                    }
+  //                  }
+  //                }
+  //
+  //                j += 1
+  //              }
+  //              localWriter.writeAddRow(row)
+  //              //              if (cdc && i % 7 == 0) {
+  //              //                localWriter.writeDeleteRow(row)
+  //              //              }
+  //            }
+  //            localWriter.commit()
+  //            Thread.sleep(upsertGapMs)
+  //          }
+  //          localWriter.close()
+  //        }
+  //      }
+  //      LakeSoulTable.uncached(tablePath)
+  //      val compactionThread = new Thread {
+  //        override def run(): Unit = {
+  //          for (c <- 1 to compactRounds) {
+  //            println(s"compactRound = $c")
+  //
+  //            lakeSoulTable.compaction(fileNumLimit = Some(2), fileSizeLimit = Some("10KB"), force = false)
+  //            Thread.sleep(compactGapMs) // Simulate compaction delay
+  //          }
+  //        }
+  //      }
+  //      //      insertThread.start()
+  //      //      compactionThread.start()
+  //      //      insertThread.join()
+  //      //      compactionThread.join()
+  //      //      val compactedData = lakeSoulTable.toDF.orderBy("id", "date").collect()
+  //      //      assert(compactedData.length == upsertRounds * upsertRows + 5, s"The compressed data should have 105 rows, but it actually has ${compactedData.length} rows")
+  //    }
+  //  }
 
-  test("compaction with concurrent data insertion and compaction") {
-    withTempDir { tempDir =>
-      //      val tempDir = org.apache.spark.util.Utils.createDirectory(System.getProperty("java.io.tmpdir"))
-      val tablePath = tempDir.getCanonicalPath
-      //      val spark = SparkSession.active
-
-      val hashBucketNum = 4
-      val compactRounds = 10
-      val compactGapMs = 10000
-      val upsertRounds = 100
-      val upsertGapMs = 100
-      val upsertRows = 1024
-      val compactGroupSize = 3
-      val cdc = true
-      val ranges = 2;
-
-      val fields: util.List[Field] = if (cdc) {
-        util.Arrays.asList(
-          new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null),
-          new Field("date", FieldType.nullable(new ArrowType.Utf8), null),
-          new Field("value", FieldType.nullable(new ArrowType.Int(32, true)), null),
-          new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null),
-          new Field(TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT, FieldType.nullable(new ArrowType.Utf8), null),
-        )
-      } else {
-        util.Arrays.asList(
-          new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null),
-          new Field("date", FieldType.nullable(new ArrowType.Utf8), null),
-          new Field("value", FieldType.nullable(new ArrowType.Int(32, true)), null),
-          new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null),
-        )
-      }
-      //      if (cdc) fields = util.Arrays.asList(new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("int", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("utf8", FieldType.nullable(new ArrowType.Utf8), null), new Field("decimal", FieldType.nullable(ArrowType.Decimal.createDecimal(10, 3, null)), null), new Field("boolean", FieldType.nullable(new ArrowType.Bool), null), new Field("date", FieldType.nullable(new ArrowType.Date(DateUnit.DAY)), null), new Field("datetimeSec", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.SECOND, ZoneId.of("UTC").toString)), null), new Field(TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT, FieldType.notNullable(new ArrowType.Utf8), null), new Field("datetimeMilli", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.MILLISECOND, ZoneId.of("UTC").toString)), null))
-      //      else fields = util.Arrays.asList(new Field("id", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("range", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("int", FieldType.nullable(new ArrowType.Int(32, true)), null), new Field("utf8", FieldType.nullable(new ArrowType.Utf8), null), new Field("decimal", FieldType.nullable(ArrowType.Decimal.createDecimal(10, 3, null)), null), new Field("boolean", FieldType.nullable(new ArrowType.Bool), null), new Field("date", FieldType.nullable(new ArrowType.Date(DateUnit.DAY)), null), new Field("datetimeSec", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.SECOND, ZoneId.of("UTC").toString)), null), new Field("datetimeMilli", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.MILLISECOND, ZoneId.of("UTC").toString)), null))
-
-      val numCols = fields.size
-      // Create test data
-      val df = if (cdc) {
-        Seq(
-          (-1, "2023-01-01", 10, ranges + 1, "insert"),
-          (-2, "2023-01-02", 20, ranges + 1, "insert"),
-          (-3, "2023-01-03", 30, ranges + 1, "insert"),
-          (-4, "2023-01-04", 40, ranges + 1, "insert"),
-          (-5, "2023-01-05", 50, ranges + 1, "insert")
-        ).toDF("id", "date", "value", "range", TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT)
-      } else {
-        Seq(
-          (1, "2023-01-01", 10, ranges + 1),
-          (2, "2023-01-02", 20, ranges + 1),
-          (3, "2023-01-03", 30, ranges + 1),
-          (4, "2023-01-04", 40, ranges + 1),
-          (5, "2023-01-05", 50, ranges + 1)
-        ).toDF("id", "date", "value", "range")
-      }
-
-      // Write initial data
-      df.write
-        .format("lakesoul")
-        //        .option("rangePartitions", "range")
-        .option("hashPartitions", "id")
-        .option(SHORT_TABLE_NAME, "compaction_size_limit_table")
-        .option("hashBucketNum", hashBucketNum.toString)
-        .option(TableInfoProperty.CDC_CHANGE_COLUMN, TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT)
-        .save(tablePath)
-
-      val lakeSoulTable = LakeSoulTable.forPath(tablePath)
-      val insertThread = new Thread {
-
-        override def run(): Unit = {
-          val localWriter = new LakeSoulLocalJavaWriter()
-          val params = Map(
-            ("lakesoul.pg.url", "jdbc:postgresql://127.0.0.1:5433/test_lakesoul_meta?stringtype=unspecified"),
-            ("lakesoul.pg.username", "yugabyte"),
-            ("lakesoul.pg.password", "yugabyte"),
-            (LakeSoulLocalJavaWriter.TABLE_NAME, "compaction_size_limit_table")
+  // Add this helper method
+  private def createTestDataFrame(
+                                   startId: Int,
+                                   batchId: Int,
+                                   rowsPerBatch: Int,
+                                   isCdc: Boolean = true): DataFrame = {
+    if (isCdc) {
+      (0 until rowsPerBatch)
+        .flatMap(j => if ((j + startId) % 2 == 0) {
+          // For even j, create a delete-insert pair
+          Seq(
+            (startId + j - 1, s"2023-02-0$batchId", batchId * 100, 1, "delete"),
+            (startId + j, s"2023-02-0$batchId", batchId * 100, 1, "insert")
           )
-          localWriter.init(params.asJava)
-
-          for (c <- 0 until upsertRounds) {
-            println(s"upsertRound = $c")
-            for (i <- c * upsertRows until c * upsertRows + upsertRows) {
-              val row: Array[AnyRef] = new Array[AnyRef](if (cdc) {
-                numCols - 1
-              }
-              else {
-                numCols
-              })
-              var j: Int = 0
-              var k: Int = 0
-              while (j < numCols) {
-                if (!fields.get(j).getName.contains(TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT)) {
-                  if (fields.get(j).getName.contains("id")) {
-                    row(k) = i.asInstanceOf[AnyRef]
-                    k += 1
-                  }
-                  else {
-                    if (fields.get(j).getName.contains("range")) {
-                      row(k) = (i % ranges).asInstanceOf[AnyRef]
-                      k += 1
-                    }
-                    else {
-                      row(k) = fields.get(j).getType.accept(ArrowTypeMockDataGenerator.INSTANCE)
-                      k += 1
-                    }
-                  }
-                }
-
-                j += 1
-              }
-              localWriter.writeAddRow(row)
-              //              if (cdc && i % 7 == 0) {
-              //                localWriter.writeDeleteRow(row)
-              //              }
-            }
-            localWriter.commit()
-            Thread.sleep(upsertGapMs)
-          }
-          localWriter.close()
-        }
-      }
-      LakeSoulTable.uncached(tablePath)
-      val compactionThread = new Thread {
-        override def run(): Unit = {
-          for (c <- 1 to compactRounds) {
-            println(s"compactRound = $c")
-
-            lakeSoulTable.compaction(fileNumLimit = Some(2), fileSizeLimit = Some("10KB"), force = false)
-            Thread.sleep(compactGapMs) // Simulate compaction delay
-          }
-        }
-      }
-      //      insertThread.start()
-      //      compactionThread.start()
-      //      insertThread.join()
-      //      compactionThread.join()
-      //      val compactedData = lakeSoulTable.toDF.orderBy("id", "date").collect()
-      //      assert(compactedData.length == upsertRounds * upsertRows + 5, s"The compressed data should have 105 rows, but it actually has ${compactedData.length} rows")
+        } else {
+          // For odd j, create single insert
+          Seq((startId + j, s"2023-02-0$batchId", batchId * 100, 1, "insert"))
+        })
+        .toDF("id", "date", "value", "range", "op")
+    } else {
+      (0 until rowsPerBatch)
+        .map(j => (startId + j, s"2023-02-0$batchId", batchId * 100, 1))
+        .toDF("id", "date", "value", "range")
     }
   }
-
 
 }
