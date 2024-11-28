@@ -281,6 +281,15 @@ public class LakeSoulLocalJavaWriter implements AutoCloseable {
 
         public static final ArrowTypeMockDataGenerator INSTANCE = new ArrowTypeMockDataGenerator();
 
+        public void setCount(long count) {
+            this.count = count;
+        }
+
+
+        protected long generateValue(long count) {
+            return count % mod;
+        }
+
         @Override
         public Object visit(ArrowType.Null aNull) {
             return null;
@@ -319,7 +328,7 @@ public class LakeSoulLocalJavaWriter implements AutoCloseable {
         @Override
         public Object visit(ArrowType.Int type) {
             int bitWidth = type.getBitWidth();
-            long value = (count++) % mod;
+            long value = generateValue(count++);
             if (bitWidth <= 8) return (byte) value;
             if (bitWidth <= 2 * 8) return (short) value;
             if (bitWidth <= 4 * 8) return (int) value;
@@ -328,7 +337,7 @@ public class LakeSoulLocalJavaWriter implements AutoCloseable {
 
         @Override
         public Object visit(ArrowType.FloatingPoint type) {
-            double value = ((double) (count++)) / mod;
+            double value = ((double) generateValue(count++)) / mod;
             switch (type.getPrecision()) {
                 case HALF:
                 case SINGLE:
@@ -339,53 +348,53 @@ public class LakeSoulLocalJavaWriter implements AutoCloseable {
 
         @Override
         public Object visit(ArrowType.Utf8 utf8) {
-            return String.valueOf((count++) % mod);
+            return String.valueOf(generateValue(count++));
         }
 
         @Override
         public Object visit(ArrowType.LargeUtf8 largeUtf8) {
-            return String.valueOf((count++) % mod);
+            return String.valueOf(generateValue(count++));
         }
 
         @Override
         public Object visit(ArrowType.Binary binary) {
-            return String.valueOf((count++) % mod).getBytes();
+            return String.valueOf(generateValue(count++)).getBytes();
         }
 
         @Override
         public Object visit(ArrowType.LargeBinary largeBinary) {
-            return String.valueOf((count++) % mod).getBytes();
+            return String.valueOf(generateValue(count++)).getBytes();
         }
 
         @Override
         public Object visit(ArrowType.FixedSizeBinary fixedSizeBinary) {
-            return String.valueOf((count++) % mod).getBytes();
+            return String.valueOf(generateValue(count++)).getBytes();
         }
 
         @Override
         public Object visit(ArrowType.Bool bool) {
-            return (count++) % 2 == 0;
+            return generateValue(count++) % 2 == 0;
         }
 
         @Override
         public Object visit(ArrowType.Decimal decimal) {
-            return new BigDecimal(((double) (count++)) / mod).setScale(decimal.getScale(), BigDecimal.ROUND_UP);
+            return new BigDecimal(((double) generateValue(count++)) / mod).setScale(decimal.getScale(), BigDecimal.ROUND_UP);
         }
 
         @Override
         public Object visit(ArrowType.Date date) {
-            return (int) ((count++) % mod);
+            return (int) generateValue(count++);
         }
 
         @Override
         public Object visit(ArrowType.Time time) {
-            long value = (count++) % mod;
+            long value = generateValue(count++);
             return new Timestamp(value * 1_000_000_000);
         }
 
         @Override
         public Object visit(ArrowType.Timestamp timestamp) {
-            long value = (count++) % mod;
+            long value = generateValue(count++);
             return new java.sql.Timestamp(value * 1000); // 将秒转换为毫秒
         }
 

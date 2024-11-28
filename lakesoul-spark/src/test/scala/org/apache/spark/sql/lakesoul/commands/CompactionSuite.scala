@@ -923,15 +923,15 @@ class CompactionSuite extends QueryTest
   //      val tablePath = tempDir.getCanonicalPath
   //      //      val spark = SparkSession.active
   //
-  //      val hashBucketNum = 4
-  //      val compactRounds = 10
+  //      val hashBucketNum = 8
+  //      val compactRounds = 12
   //      val compactGapMs = 10000
-  //      val upsertRounds = 100
-  //      val upsertGapMs = 100
-  //      val upsertRows = 1024
-  //      val compactGroupSize = 3
+  //      val upsertRounds = 400
+  //      val upsertGapMs = 300
+  //      val upsertRows = 30000
+  //      val compactGroupSize = 5
   //      val cdc = true
-  //      val ranges = 2;
+  //      val ranges = 1
   //
   //      val fields: util.List[Field] = if (cdc) {
   //        util.Arrays.asList(
@@ -984,6 +984,7 @@ class CompactionSuite extends QueryTest
   //
   //      val lakeSoulTable = LakeSoulTable.forPath(tablePath)
   //      val insertThread = new Thread {
+  //        var maxId = 0
   //
   //        override def run(): Unit = {
   //          val localWriter = new LakeSoulLocalJavaWriter()
@@ -995,9 +996,13 @@ class CompactionSuite extends QueryTest
   //          )
   //          localWriter.init(params.asJava)
   //
-  //          for (c <- 0 until upsertRounds) {
+  //          ArrowTypeMockDataGenerator.INSTANCE.setCount(20)
+  //
+  //          for (c <- 1 to upsertRounds) {
   //            println(s"upsertRound = $c")
   //            for (i <- c * upsertRows until c * upsertRows + upsertRows) {
+  //              val id = i / 3 * 2 + i % 3
+  //              maxId = Math.max(id, maxId)
   //              val row: Array[AnyRef] = new Array[AnyRef](if (cdc) {
   //                numCols - 1
   //              }
@@ -1009,12 +1014,14 @@ class CompactionSuite extends QueryTest
   //              while (j < numCols) {
   //                if (!fields.get(j).getName.contains(TableInfoProperty.CDC_CHANGE_COLUMN_DEFAULT)) {
   //                  if (fields.get(j).getName.contains("id")) {
-  //                    row(k) = i.asInstanceOf[AnyRef]
+  //
+  //
+  //                    row(k) = id.asInstanceOf[AnyRef]
   //                    k += 1
   //                  }
   //                  else {
   //                    if (fields.get(j).getName.contains("range")) {
-  //                      row(k) = (i % ranges).asInstanceOf[AnyRef]
+  //                      row(k) = (id % ranges).asInstanceOf[AnyRef]
   //                      k += 1
   //                    }
   //                    else {
@@ -1027,9 +1034,9 @@ class CompactionSuite extends QueryTest
   //                j += 1
   //              }
   //              localWriter.writeAddRow(row)
-  //              //              if (cdc && i % 7 == 0) {
-  //              //                localWriter.writeDeleteRow(row)
-  //              //              }
+  //              if (cdc && id % 2 == 0) {
+  //                localWriter.writeDeleteRow(row)
+  //              }
   //            }
   //            localWriter.commit()
   //            Thread.sleep(upsertGapMs)
@@ -1043,17 +1050,25 @@ class CompactionSuite extends QueryTest
   //          for (c <- 1 to compactRounds) {
   //            println(s"compactRound = $c")
   //
-  //            lakeSoulTable.compaction(fileNumLimit = Some(2), fileSizeLimit = Some("10KB"), force = false)
+  //            lakeSoulTable.compaction(fileNumLimit = Some(10), fileSizeLimit = Some("1MB"), force = false)
+  //            //            lakeSoulTable.compaction(fileNumLimit = Option.empty, fileSizeLimit = Some("1MB"), force = false)
   //            Thread.sleep(compactGapMs) // Simulate compaction delay
   //          }
   //        }
   //      }
-  //      //      insertThread.start()
-  //      //      compactionThread.start()
-  //      //      insertThread.join()
-  //      //      compactionThread.join()
-  //      //      val compactedData = lakeSoulTable.toDF.orderBy("id", "date").collect()
-  //      //      assert(compactedData.length == upsertRounds * upsertRows + 5, s"The compressed data should have 105 rows, but it actually has ${compactedData.length} rows")
+  //      insertThread.start()
+  //      compactionThread.start()
+  //      insertThread.join()
+  //      compactionThread.join()
+  //      val compactedData = lakeSoulTable.toDF.orderBy("id", "date").collect()
+  //
+  //      val expected = if (cdc) {
+  //        (insertThread.maxId - (upsertRows / 3 * 2 - 1)) / 2 + 5
+  //      } else {
+  //        insertThread.maxId - (upsertRows / 3 * 2 - 1) + 5
+  //      }
+  //      println(s"expected $expected rows")
+  //      assert(compactedData.length == expected, s"The compressed data should have $expected rows, but it actually has ${compactedData.length} rows")
   //    }
   //  }
 
