@@ -55,6 +55,7 @@ use url::Url;
 
 use crate::args::Args;
 use crate::jwt::{Claims, JwtServer};
+use crate::rbac::verify_permission;
 use crate::{arrow_error_to_status, datafusion_error_to_status, lakesoul_error_to_status, lakesoul_metadata_error_to_status};
 use metrics::{counter, gauge, histogram};
 use std::time::Instant;
@@ -637,7 +638,7 @@ impl FlightSqlService for FlightSqlServiceImpl {
         query: CommandPreparedStatementUpdate,
         request: Request<PeekableFlightDataStream>,
     ) -> Result<i64, Status> {
-        self.verify_token(request.metadata())?;
+        let claims = self.verify_token(request.metadata())?;
         info!(
             "do_put_prepared_statement_update - handle: {:?}",
             std::str::from_utf8(&query.prepared_statement_handle).unwrap_or("invalid utf8")
@@ -652,20 +653,22 @@ impl FlightSqlService for FlightSqlServiceImpl {
                 op: WriteOp::Insert(_),
                 table_name,
                 ..
-            }) => Arc::new(LakeSoulTable::for_table_reference(table_name).await.unwrap()),
+            }) => Arc::new(LakeSoulTable::for_table_reference(table_name).await.map_err(|e| status!("table not found", e))?),
             LogicalPlan::Ddl(DdlStatement::CreateExternalTable(cmd)) => {
                 info!("create external table: {}, {:?}", cmd.name, cmd.definition);
-                Arc::new(LakeSoulTable::for_table_reference(&cmd.name).await.unwrap())
+                Arc::new(LakeSoulTable::for_table_reference(&cmd.name).await.map_err(|e| status!("table not found", e))?)
             }
             LogicalPlan::EmptyRelation(_) => Arc::new(
                 LakeSoulTable::for_table_reference(&TableReference::from("test_table"))
-                    .await
-                    .unwrap(),
+                    .await.map_err(|e| status!("table not found", e))?
             ),
             _ => Err(Status::internal(
                 "Not a valid insert into or create external table plan",
             ))?,
         };
+        let _ = verify_permission(claims, table.table_namespace(), table.table_name(), self.get_metadata_client())
+            .await.map_err(|e| status!("Error verifying permission", e))?;
+
         let stream = request.into_inner();
 
         let mut stream = FlightRecordBatchStream::new_from_flight_data(stream.map_err(|e| e.into()));
@@ -774,8 +777,13 @@ impl FlightSqlService for FlightSqlServiceImpl {
         cmd: CommandStatementIngest,
         request: Request<PeekableFlightDataStream>,
     ) -> Result<i64, Status> {
+        let claims = self.verify_token(request.metadata())?;
+        
         let CommandStatementIngest { table_definition_options, table, schema, catalog, temporary, transaction_id, options } = cmd;
         info!("do_put_statement_ingest: table: {table}, schema: {schema:?}, catalog: {catalog:?}, temporary: {temporary}, transaction_id: {transaction_id:?}, options: {options:?} table_definition_options: {table_definition_options:?}");
+
+        let _ = verify_permission(claims, schema.clone().unwrap_or("default".to_string()).as_str(), table.as_str(), self.get_metadata_client())
+            .await.map_err(|e| status!("Error verifying permission", e))?;
 
         // 获取输入流
         let stream = request.into_inner();
@@ -784,6 +792,7 @@ impl FlightSqlService for FlightSqlServiceImpl {
         // let table = Arc::new(LakeSoulTable::for_namespace_and_name(schema.unwrap_or("default".to_string()).as_str(), &table)
         //     .await
         //     .map_err(|e| Status::internal(format!("Error creating table: {}", e)))?);
+
         let table_reference = TableReference::from(match &schema {
             Some(schema) => TableReference::partial(schema.as_str(), table.as_str()),
             None => TableReference::bare(table.as_str()),
@@ -1196,9 +1205,9 @@ impl FlightSqlServiceImpl {
         self.jwt_server.clone()
     }
 
-    fn verify_token(&self, metadata: &MetadataMap) -> Result<(), Status> {
+    fn verify_token(&self, metadata: &MetadataMap) -> Result<Claims, Status> {
         if !self.auth_enabled {
-            return Ok(())
+            return Ok(Default::default());
         }
         let authorization = metadata
             .get("Authorization")
@@ -1218,11 +1227,10 @@ impl FlightSqlServiceImpl {
                 "Invalid authorization token: {token}"
             )));
         }
-        let _ = self
+        self
             .jwt_server
             .decode_token(token)
-            .map_err(|e| Status::permission_denied(format!("Invalid authorization token: {e}")))?;
-        Ok(())
+            .map_err(|e| Status::permission_denied(format!("Invalid authorization token: {e}")))
     }
 
     fn get_io_config_builder(&self) -> LakeSoulIOConfigBuilder {
