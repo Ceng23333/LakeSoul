@@ -1,0 +1,13 @@
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH
+export PYTHONPATH=/opt/python_packages:$PYTHONPATH

@@ -54,6 +54,9 @@ services:
     networks:
       - lakesoul-ann
     command: /opt/bitnami/minio/bin/minio server /data --console-address ":9001"
+    volumes:
+      - ./data/minio:/data
+    user: "root"
 
   spark:
     image: bitnami/spark:3.3.1
@@ -66,7 +69,8 @@ services:
       - ./data/spark-conf:/opt/bitnami/spark/conf
       - ./sql/prepare_ann_benchmark.sql:/opt/sql/prepare_ann_benchmark.sql
       - ./data/embeddings:/data/embeddings
-      - ./python:/opt/bitnami/spark/python
+      - ./python_scripts:/opt/bitnami/spark/python_scripts
+      
     depends_on:
       - postgres
       - minio
@@ -78,6 +82,8 @@ services:
       - LAKESOUL_PG_URL=jdbc:postgresql://${LAKESOUL_META_HOST}:5432/lakesoul_test?stringtype=unspecified
       - LAKESOUL_PG_USERNAME=lakesoul_test
       - LAKESOUL_PG_PASSWORD=lakesoul_test
+      - PYTHONPATH=/opt/bitnami/python/bin/python
+      
     networks:
       - lakesoul-ann
 
