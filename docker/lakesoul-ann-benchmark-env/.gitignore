@@ -48,6 +48,7 @@ ENV/
 # Project-specific directories
 packages/
 data/embeddings/
+data/minio/
 fashion-mnist-784-euclidean.hdf5
 
 # OS-specific files
