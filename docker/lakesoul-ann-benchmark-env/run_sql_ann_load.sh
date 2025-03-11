@@ -1,40 +1,43 @@
 #!/usr/bin/env bash
 
-# Script to run the fixed ANN data loading process with self-query
+# Script to run the SQL-based ANN data loading process
 
 WAREHOUSE="s3a://lakesoul-test-bucket/lakesoul-test"
-TABLE_NAME="mnist_ann_table"
+TABLE_NAME="mnist_sql_ann_table"
 HDF5_FILE="/data/embeddings/fashion-mnist-784-euclidean.hdf5"
 EMBEDDING_DIM=784
-BUCKET_LENGTH=2.0
-NUM_HASH_TABLES=3
-SAMPLE_RATIO=0.05  # Use only 5% of the data to avoid memory issues
-QUERY_LIMIT=10     # Number of queries to run for self-evaluation
-TOPK=10            # Number of nearest neighbors to return in self-evaluation
+BUCKET_LENGTH=784.0
+NUM_HASH_TABLES=10
+SAMPLE_RATIO=1.0  # Use full dataset or reduce to avoid memory issues
 
 # MinIO configuration
 S3_ENDPOINT="http://minio:9000"
 ACCESS_KEY="admin"
 SECRET_KEY="password"
 
-# Copy the fixed script to the container
-echo "Copying fixed ANN script to container..."
-docker cp fixed_ann_script.py lakesoul-ann-spark:/tmp/
+# Ensure script is executable
+chmod +x /home/huazeng/Git/LakeSoul/docker/lakesoul-ann-benchmark-env/lakesoul_lsh_ann.py
 
-echo "Running fixed LSH ANN model training and data loading with self-query..."
+# First, update the script inside the container
+./update_script_in_container.sh
+
+echo "Running SQL-based LSH ANN data loading..."
 docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
     --master "local[*]" \
-    --driver-memory 4g \
-    --executor-memory 4g \
+    --driver-memory 6g \
+    --executor-memory 6g \
     --conf "spark.memory.offHeap.enabled=true" \
-    --conf "spark.memory.offHeap.size=1g" \
+    --conf "spark.memory.offHeap.size=2g" \
     --conf "spark.hadoop.fs.s3a.endpoint=${S3_ENDPOINT}" \
     --conf "spark.hadoop.fs.s3a.access.key=${ACCESS_KEY}" \
     --conf "spark.hadoop.fs.s3a.secret.key=${SECRET_KEY}" \
     --conf "spark.hadoop.fs.s3a.path.style.access=true" \
     --conf "spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem" \
     --conf "spark.hadoop.fs.s3a.connection.ssl.enabled=false" \
-    /tmp/fixed_ann_script.py \
+    --conf "spark.driver.maxResultSize=1g" \
+    --conf "spark.memory.fraction=0.8" \
+    --conf "spark.sql.shuffle.partitions=8" \
+    /tmp/lakesoul_lsh_ann.py \
     --mode load \
     --hdf5-file ${HDF5_FILE} \
     --table-name ${TABLE_NAME} \
@@ -42,9 +45,6 @@ docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
     --embedding-dim ${EMBEDDING_DIM} \
     --bucket-length ${BUCKET_LENGTH} \
     --num-hash-tables ${NUM_HASH_TABLES} \
-    --sample-ratio ${SAMPLE_RATIO} \
-    --self-query \
-    --query-limit ${QUERY_LIMIT} \
-    --topk ${TOPK}
+    --sample-ratio ${SAMPLE_RATIO}
 
-echo "Fixed ANN data loading with self-query completed!" 
+echo "SQL-based ANN data loading completed!" 

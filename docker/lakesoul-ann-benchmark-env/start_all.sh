@@ -78,11 +78,6 @@ echo "Start docker-compose..."
 # Start docker-compose with environment file
 docker compose -f docker-compose.yml --env-file docker-compose.env up -d
 
-# Copy Python scripts to container
-docker cp python_scripts lakesoul-ann-spark:/tmp/
-# Copy each file to /tmp for easier access
-docker exec lakesoul-ann-spark bash -c "cp /tmp/python_scripts/* /tmp/"
-
 # Copy Python 3.8 packages to the container
 echo "Copying Python packages to the container..."
 docker exec lakesoul-ann-spark mkdir -p /opt/python_packages
@@ -114,6 +109,7 @@ docker exec lakesoul-ann-minio mc policy set public local/lakesoul-test-bucket
 docker exec lakesoul-ann-minio mc mkdir -p local/lakesoul-test-bucket/lakesoul-test
 
 echo "MinIO configuration completed!"
+
 
 # bash prepare_ann_table.sh
 

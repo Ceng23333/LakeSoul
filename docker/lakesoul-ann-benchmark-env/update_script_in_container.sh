@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 
-# Script to update the fixed_ann_script.py inside the Docker container
+# Script to update the Python scripts inside the Docker container
 
-echo "Copying updated fixed_ann_script.py to the lakesoul-ann-spark container..."
-docker cp fixed_ann_script.py lakesoul-ann-spark:/tmp/
+# Copy the original script
+echo "Copying spark_native_script.py to the lakesoul-ann-spark container..."
+docker cp spark_native_script.py lakesoul-ann-spark:/tmp/
 
-# Verify the file was copied successfully
-echo "Verifying file was copied..."
-docker exec lakesoul-ann-spark ls -la /tmp/fixed_ann_script.py
+# Copy the SQL-based LSH implementation
+echo "Copying lakesoul_lsh_ann.py to the lakesoul-ann-spark container..."
+docker cp lakesoul_lsh_ann.py lakesoul-ann-spark:/tmp/
 
-echo "Script updated in container!"
-echo "You can now run queries with: ./run_fixed_ann_query.sh" 
+# Verify the files were copied successfully
+echo "Verifying files were copied..."
+docker exec lakesoul-ann-spark ls -la /tmp/spark_native_script.py
+docker exec lakesoul-ann-spark ls -la /tmp/lakesoul_lsh_ann.py
+
+echo "Scripts updated in container!"
+echo "You can now run queries with:"
+echo "  - Original implementation: ./run_fixed_ann_query.sh"
+echo "  - SQL-based implementation: ./run_sql_ann_query.sh" 
