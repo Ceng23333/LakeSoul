@@ -87,6 +87,7 @@ services:
       - ./data/embeddings:/data/embeddings
       - ./python_scripts:/opt/bitnami/spark/python_scripts
       - ./spark_native_script.py:/tmp/spark_native_script.py
+      - ./lakesoul_lsh_ann.py:/tmp/lakesoul_lsh_ann.py
     deploy:
       resources:
         limits:

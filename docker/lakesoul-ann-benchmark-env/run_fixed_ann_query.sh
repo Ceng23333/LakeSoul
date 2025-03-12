@@ -7,8 +7,9 @@ HDF5_FILE="/data/embeddings/fashion-mnist-784-euclidean.hdf5"
 QUERY_LIMIT=1
 TOPK=10
 WAREHOUSE="s3a://lakesoul-test-bucket/lakesoul-test"
-BUCKET_LENGTH=2.0
-NUM_HASH_TABLES=3
+BUCKET_LENGTH=784.0
+NUM_HASH_TABLES=10
+PRE_RANK_SIZE=1000
 COMPUTE_RECALL=true  # Set to false to skip recall computation if it's too slow
 DISTANCE_THRESHOLD=50000.0
 # MinIO configuration
@@ -32,7 +33,6 @@ docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
     --conf "spark.driver.maxResultSize=1g" \
     --conf "spark.memory.fraction=0.8" \
     --conf "spark.sql.shuffle.partitions=8" \
-    --conf "spark.cleaner.periodicGC.interval=1min" \
     /tmp/spark_native_script.py \
     --mode query \
     --hdf5-file ${HDF5_FILE} \
@@ -41,7 +41,7 @@ docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
     --query-limit ${QUERY_LIMIT} \
     --topk ${TOPK} \
     --bucket-length ${BUCKET_LENGTH} \
-    --num-hash-tables ${NUM_HASH_TABLES} \
+    --pre-rank-size ${PRE_RANK_SIZE} \
     --distance-threshold ${DISTANCE_THRESHOLD} \
     ${COMPUTE_RECALL:+--compute-recall}
 

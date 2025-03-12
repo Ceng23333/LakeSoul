@@ -67,8 +67,11 @@ deactivate
 
 mkdir -p packages/jars
 
+
+echo "Copying ${SPARK_LAKESOUL_JAR} and ${SPARK_LAKESOUL_TEST_JAR} to packages/jars/"
 cp ../../lakesoul-spark/target/${SPARK_LAKESOUL_JAR} packages/jars/
 cp ../../lakesoul-spark/target/${SPARK_LAKESOUL_TEST_JAR} packages/jars/
+ls -l packages/jars/
 
 # Make the run scripts executable
 chmod +x run_ann_load.sh
@@ -102,11 +105,11 @@ else
 fi
 
 # Set write policy for the bucket (readwrite access)
-docker exec lakesoul-ann-minio mc policy set readwrite local/lakesoul-test-bucket
-docker exec lakesoul-ann-minio mc policy set public local/lakesoul-test-bucket
+docker exec lakesoul-ann-minio mc anonymous set download local/lakesoul-test-bucket
+docker exec lakesoul-ann-minio mc anonymous set upload local/lakesoul-test-bucket
 
 # Create the lakesoul-test directory inside the bucket to ensure it exists
-docker exec lakesoul-ann-minio mc mkdir -p local/lakesoul-test-bucket/lakesoul-test
+docker exec lakesoul-ann-minio touch /tmp/empty.txt && docker cp /tmp/empty.txt lakesoul-ann-minio:/tmp/empty.txt && docker exec lakesoul-ann-minio mc cp /tmp/empty.txt local/lakesoul-test-bucket/lakesoul-test/ && rm /tmp/empty.txt
 
 echo "MinIO configuration completed!"
 

@@ -6,8 +6,7 @@ WAREHOUSE="s3a://lakesoul-test-bucket/lakesoul-test"
 TABLE_NAME="mnist_sql_ann_table"
 HDF5_FILE="/data/embeddings/fashion-mnist-784-euclidean.hdf5"
 EMBEDDING_DIM=784
-BUCKET_LENGTH=784.0
-NUM_HASH_TABLES=10
+NUM_HASH_TABLES=784
 SAMPLE_RATIO=1.0  # Use full dataset or reduce to avoid memory issues
 
 # MinIO configuration
@@ -18,8 +17,7 @@ SECRET_KEY="password"
 # Ensure script is executable
 chmod +x /home/huazeng/Git/LakeSoul/docker/lakesoul-ann-benchmark-env/lakesoul_lsh_ann.py
 
-# First, update the script inside the container
-./update_script_in_container.sh
+# No need to update the script in the container since we're using a volume mount
 
 echo "Running SQL-based LSH ANN data loading..."
 docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
@@ -43,7 +41,6 @@ docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
     --table-name ${TABLE_NAME} \
     --warehouse ${WAREHOUSE} \
     --embedding-dim ${EMBEDDING_DIM} \
-    --bucket-length ${BUCKET_LENGTH} \
     --num-hash-tables ${NUM_HASH_TABLES} \
     --sample-ratio ${SAMPLE_RATIO}
 

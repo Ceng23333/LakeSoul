@@ -7,10 +7,9 @@ HDF5_FILE="/data/embeddings/fashion-mnist-784-euclidean.hdf5"
 QUERY_LIMIT=5
 TOPK=10
 WAREHOUSE="s3a://lakesoul-test-bucket/lakesoul-test"
-BUCKET_LENGTH=2.0
-NUM_HASH_TABLES=3
+
+PRE_RANK_SIZE=100000
 COMPUTE_RECALL=true  # Set to false to skip recall computation if it's too slow
-DISTANCE_THRESHOLD=50000.0
 
 # MinIO configuration
 S3_ENDPOINT="http://minio:9000"
@@ -20,8 +19,7 @@ SECRET_KEY="password"
 # Ensure script is executable
 chmod +x /home/huazeng/Git/LakeSoul/docker/lakesoul-ann-benchmark-env/lakesoul_lsh_ann.py
 
-# First, update the script inside the container
-./update_script_in_container.sh
+# No need to update the script in the container since we're using a volume mount
 
 echo "Running SQL-based LSH ANN querying..."
 docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
@@ -39,7 +37,6 @@ docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
     --conf "spark.driver.maxResultSize=1g" \
     --conf "spark.memory.fraction=0.8" \
     --conf "spark.sql.shuffle.partitions=8" \
-    --conf "spark.cleaner.periodicGC.interval=1min" \
     /tmp/lakesoul_lsh_ann.py \
     --mode query \
     --hdf5-file ${HDF5_FILE} \
@@ -47,9 +44,7 @@ docker exec -it lakesoul-ann-spark /opt/bitnami/spark/bin/spark-submit \
     --warehouse ${WAREHOUSE} \
     --query-limit ${QUERY_LIMIT} \
     --topk ${TOPK} \
-    --bucket-length ${BUCKET_LENGTH} \
-    --num-hash-tables ${NUM_HASH_TABLES} \
-    --distance-threshold ${DISTANCE_THRESHOLD} \
+    --pre-rank-size ${PRE_RANK_SIZE} \
     ${COMPUTE_RECALL:+--compute-recall}
 
 echo "SQL-based ANN query completed!" 
